@@ -111,10 +111,6 @@ Transform raw audio into customizable singing performances with:
 
 ### **2.2 Lyric Editing Interface**  
 
-#### **Key Functions**  
-
-
-
 **Code Implementation:**  
 
 ```python
