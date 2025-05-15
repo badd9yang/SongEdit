@@ -19,7 +19,7 @@
 conda create -n songedit python=3.10 -y
 conda activate songedit
 
-# Install dependencies (env.sh contents)
+# Install dependencies
 pip install torch==2.0.1+cu117 --extra-index-url https://download.pytorch.org/whl/cu117
 pip install onnxruntime-gpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/
 pip install -r requirements.txt
