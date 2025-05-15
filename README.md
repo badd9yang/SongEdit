@@ -216,8 +216,10 @@ We extend gratitude to the open-source community:
 
 ---
 
-**📌  Last Updated: May 2025**   
+**📌 Last Updated: May 2025**  
 
 > *"From raw audio to professional vocal production – all in one pipeline."*  
 
-[Contact Support](yangchen@hccl.ioa.ac.cn) | [GitHub Repository](github.com/badd9yang) | [API Reference](diffsinger.com) 
+📧 [Contact Support](mailto:yangchen@hccl.ioa.ac.cn) | 💻 [GitHub Repository](https://github.com/badd9yang) | 🌐 [API Reference](https://diffsinger.com)  
+
+---
