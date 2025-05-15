@@ -39,8 +39,7 @@ pip install huggingface_hub
 # Download all checkpoints
 python -c "
 from huggingface_hub import snapshot_download
-snapshot_download(repo_id='badd9yang/songedit',
-                  local_dir='checkpoints')  # Optional for private repos
+snapshot_download(repo_id='badd9yang/songedit', local_dir='checkpoints')
 "
 
 # Expected folder structure:
@@ -205,7 +204,7 @@ model.combine(
 ✅ **Real-Time Voice Conversion** – <500ms latency  
 
 ### **Roadmap**  
-🔜 **DiffSinger Acoustic new version ** – Flow Matching architecture (3× faster)  
+🔜 **DiffSinger Acoustic new version** – Flow Matching architecture (3× faster)  
 
 🔜 **add DiffSinger Variance Model** – Style Controllable 
 
