@@ -1,7 +1,4 @@
-#!/usr/bin/env python3
-# cython: language_level=3
-# Copyright (c) 2025 IACAS. by YangChen
-#
+# Copyright (c) 2025 by badd9yang
 
 __doc__ = """ 
 Step. 1. Source Separation and DeEcho; return singing voice and MFA and MIDI result.
