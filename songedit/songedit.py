@@ -3,10 +3,10 @@
 # Copyright (c) 2025 IACAS. by YangChen
 #
 
-""" 
+__doc__ = """ 
 Step. 1. Source Separation and DeEcho; return singing voice and MFA and MIDI result.
-    系统会对歌声进行分离、歌词识别以及初步片段切分和对齐，用户需要根据切分结果对歌声片段进行校正，类比ACEStudio的功能。
 """
+
 import csv
 import glob
 import json
@@ -19,6 +19,7 @@ import sys
 import time
 import types
 import warnings
+
 import onnxruntime
 
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -30,8 +31,18 @@ from functools import partial
 from math import isclose
 from multiprocessing import cpu_count
 from pathlib import Path
-from typing import (Any, Callable, Dict, List, Literal, NamedTuple, Optional,
-                    Text, Tuple, Union)
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    NamedTuple,
+    Optional,
+    Text,
+    Tuple,
+    Union,
+)
 
 import cn2an
 import faster_whisper
@@ -48,7 +59,6 @@ import torch.nn.functional as F
 import torchaudio
 import tqdm
 import yaml
-from cryptography.fernet import Fernet
 from einops import pack, rearrange, reduce, repeat, unpack
 from librosa.filters import mel
 from ml_collections import ConfigDict
@@ -68,12 +78,9 @@ from textgrid import TextGrid
 from torch import einsum, nn
 from torch.utils.data import Dataset
 from transformers.pipelines.base import ChunkPipeline
-from whisperx.asr import (FasterWhisperPipeline, WhisperModel,
-                          find_numeral_symbol_tokens)
-from whisperx.audio import (N_SAMPLES, SAMPLE_RATE, load_audio,
-                            log_mel_spectrogram)
+from whisperx.asr import FasterWhisperPipeline, WhisperModel, find_numeral_symbol_tokens
+from whisperx.audio import N_SAMPLES, SAMPLE_RATE, load_audio, log_mel_spectrogram
 from whisperx.types import SingleSegment, TranscriptionResult
-
 
 secret_key = "my_custom_secret_key_2023"
 
@@ -244,8 +251,22 @@ dia_pipeline_config = {
 }
 
 # TODO set DS_KEY to dataclass
-DS_KEYS=['offset', 'offset_end', 'text', 'word_seq',
-         'word2ph','word_dur','ph_seq','ph_dur','ph_num','note_seq','note_dur','note_slur','f0_seq', 'f0_timestep']
+DS_KEYS = [
+    "offset",
+    "offset_end",
+    "text",
+    "word_seq",
+    "word2ph",
+    "word_dur",
+    "ph_seq",
+    "ph_dur",
+    "ph_num",
+    "note_seq",
+    "note_dur",
+    "note_slur",
+    "f0_seq",
+    "f0_timestep",
+]
 
 dictionary = """a	a
 ai	ai
@@ -856,6 +877,7 @@ SP	SP"""
 #                           ASR                         #
 #########################################################
 
+
 class VadFreeFasterWhisperPipeline(FasterWhisperPipeline):
     """
     FasterWhisperModel without VAD
@@ -929,13 +951,13 @@ class VadFreeFasterWhisperPipeline(FasterWhisperPipeline):
         language_token, language_probability = results[0][0]
         language = language_token[2:-2]
         return language, language_probability
-    
+
     def _sanitize_parameters(self, **kwargs):
         preprocess_kwargs = {}
         if "tokenizer" in kwargs:
             preprocess_kwargs["maybe_arg"] = kwargs["maybe_arg"]
         return preprocess_kwargs, {}, {}
-    
+
     def pass_call(self, inputs, *args, num_workers=None, batch_size=None, **kwargs):
 
         if num_workers is None:
@@ -949,7 +971,11 @@ class VadFreeFasterWhisperPipeline(FasterWhisperPipeline):
             else:
                 batch_size = self._batch_size
 
-        preprocess_params, forward_params, postprocess_params = self._sanitize_parameters(**kwargs)
+        (
+            preprocess_params,
+            forward_params,
+            postprocess_params,
+        ) = self._sanitize_parameters(**kwargs)
 
         # Fuse __init__ params and __call__ params without modifying the __init__ ones.
         preprocess_params = {**self._preprocess_params, **preprocess_params}
@@ -957,7 +983,11 @@ class VadFreeFasterWhisperPipeline(FasterWhisperPipeline):
         postprocess_params = {**self._postprocess_params, **postprocess_params}
 
         self.call_count += 1
-        if self.call_count > 10 and self.framework == "pt" and self.device.type == "cuda":
+        if (
+            self.call_count > 10
+            and self.framework == "pt"
+            and self.device.type == "cuda"
+        ):
             raise Warning(
                 "You seem to be using the pipelines sequentially on GPU. In order to maximize efficiency please use a"
                 " dataset",
@@ -969,33 +999,56 @@ class VadFreeFasterWhisperPipeline(FasterWhisperPipeline):
 
         is_iterable = is_dataset or is_generator or is_list
         # TODO make the get_iterator work also for `tf` (and `flax`).
-        can_use_iterator = self.framework == "pt" and (is_dataset or is_generator or is_list)
+        can_use_iterator = self.framework == "pt" and (
+            is_dataset or is_generator or is_list
+        )
 
         if is_list:
             if can_use_iterator:
                 final_iterator = self.get_iterator(
-                    inputs, num_workers, batch_size, preprocess_params, forward_params, postprocess_params
+                    inputs,
+                    num_workers,
+                    batch_size,
+                    preprocess_params,
+                    forward_params,
+                    postprocess_params,
                 )
                 outputs = list(final_iterator)
                 return outputs
             else:
-                return self.run_multi(inputs, preprocess_params, forward_params, postprocess_params)
+                return self.run_multi(
+                    inputs, preprocess_params, forward_params, postprocess_params
+                )
         elif can_use_iterator:
             return self.get_iterator(
-                inputs, num_workers, batch_size, preprocess_params, forward_params, postprocess_params
+                inputs,
+                num_workers,
+                batch_size,
+                preprocess_params,
+                forward_params,
+                postprocess_params,
             )
         elif is_iterable:
-            return self.iterate(inputs, preprocess_params, forward_params, postprocess_params)
+            return self.iterate(
+                inputs, preprocess_params, forward_params, postprocess_params
+            )
         elif self.framework == "pt" and isinstance(self, ChunkPipeline):
             return next(
                 iter(
                     self.get_iterator(
-                        [inputs], num_workers, batch_size, preprocess_params, forward_params, postprocess_params
+                        [inputs],
+                        num_workers,
+                        batch_size,
+                        preprocess_params,
+                        forward_params,
+                        postprocess_params,
                     )
                 )
             )
         else:
-            return self.run_single(inputs, preprocess_params, forward_params, postprocess_params)
+            return self.run_single(
+                inputs, preprocess_params, forward_params, postprocess_params
+            )
 
     def transcribe(
         self,
@@ -1105,6 +1158,7 @@ class VadFreeFasterWhisperPipeline(FasterWhisperPipeline):
             )
 
         return {"segments": segments, "language": language}
+
 
 def load_asr_model(
     whisper_arch: str,
@@ -1216,15 +1270,19 @@ def load_asr_model(
 #########################################################
 #                           VAD                         #
 #########################################################
-class SileroVadOnnxWrapper():
-
+class SileroVadOnnxWrapper:
     def __init__(self, path, force_onnx_cpu=False):
         opts = onnxruntime.SessionOptions()
         opts.inter_op_num_threads = 1
         opts.intra_op_num_threads = 1
 
-        if force_onnx_cpu and 'CPUExecutionProvider' in onnxruntime.get_available_providers():
-            self.session = onnxruntime.InferenceSession(path, providers=['CPUExecutionProvider'], sess_options=opts)
+        if (
+            force_onnx_cpu
+            and "CPUExecutionProvider" in onnxruntime.get_available_providers()
+        ):
+            self.session = onnxruntime.InferenceSession(
+                path, providers=["CPUExecutionProvider"], sess_options=opts
+            )
         else:
             self.session = onnxruntime.InferenceSession(path, sess_options=opts)
 
@@ -1239,11 +1297,13 @@ class SileroVadOnnxWrapper():
 
         if sr != 16000 and (sr % 16000 == 0):
             step = sr // 16000
-            x = x[:,::step]
+            x = x[:, ::step]
             sr = 16000
 
         if sr not in self.sample_rates:
-            raise ValueError(f"Supported sampling rates: {self.sample_rates} (or multiply of 16000)")
+            raise ValueError(
+                f"Supported sampling rates: {self.sample_rates} (or multiply of 16000)"
+            )
         if sr / x.shape[1] > 31.25:
             raise ValueError("Input audio chunk is too short")
 
@@ -1259,10 +1319,12 @@ class SileroVadOnnxWrapper():
 
         x, sr = self._validate_input(x, sr)
         num_samples = 512 if sr == 16000 else 256
-        
+
         if x.shape[-1] != num_samples:
-            raise ValueError(f"Provided number of samples is {x.shape[-1]} (Supported values: 256 for 8000 sample rate, 512 for 16000)")
-        
+            raise ValueError(
+                f"Provided number of samples is {x.shape[-1]} (Supported values: 256 for 8000 sample rate, 512 for 16000)"
+            )
+
         batch_size = x.shape[0]
         context_size = 64 if sr == 16000 else 32
 
@@ -1278,7 +1340,11 @@ class SileroVadOnnxWrapper():
 
         x = torch.cat([self._context, x], dim=1)
         if sr in [8000, 16000]:
-            ort_inputs = {'input': x.numpy(), 'state': self._state.numpy(), 'sr': np.array(sr, dtype='int64')}
+            ort_inputs = {
+                "input": x.numpy(),
+                "state": self._state.numpy(),
+                "sr": np.array(sr, dtype="int64"),
+            }
             ort_outs = self.session.run(None, ort_inputs)
             out, state = ort_outs
             self._state = torch.from_numpy(state)
@@ -1300,15 +1366,16 @@ class SileroVadOnnxWrapper():
 
         if x.shape[1] % num_samples:
             pad_num = num_samples - (x.shape[1] % num_samples)
-            x = torch.nn.functional.pad(x, (0, pad_num), 'constant', value=0.0)
+            x = torch.nn.functional.pad(x, (0, pad_num), "constant", value=0.0)
 
         for i in range(0, x.shape[1], num_samples):
-            wavs_batch = x[:, i:i+num_samples]
+            wavs_batch = x[:, i : i + num_samples]
             out_chunk = self.__call__(wavs_batch, sr)
             outs.append(out_chunk)
 
         stacked = torch.cat(outs, dim=1)
         return stacked.cpu()
+
 
 class SileroVAD:
     """
@@ -1316,9 +1383,7 @@ class SileroVAD:
     """
 
     def __init__(
-        self,
-        model_path: str = "",
-        device=torch.device("cpu"),
+        self, model_path: str = "", device=torch.device("cpu"),
     ):
         """
         Initialize the VAD object.
@@ -1338,25 +1403,26 @@ class SileroVAD:
             self.device = device
             torch.set_num_threads(1)
             self.vad_model = SileroVadOnnxWrapper(model_path, True)
-            
+
         except Exception as e:
             raise RuntimeError(f"Failed to load VAD model: {e}")
-    
+
     @torch.no_grad()
-    def get_speech_timestamps(self,
+    def get_speech_timestamps(
+        self,
         audio: torch.Tensor,
         model,
         threshold: float = 0.5,
         sampling_rate: int = 16000,
         min_speech_duration_ms: int = 250,
-        max_speech_duration_s: float = float('inf'),
+        max_speech_duration_s: float = float("inf"),
         min_silence_duration_ms: int = 100,
         speech_pad_ms: int = 30,
         return_seconds: bool = False,
         visualize_probs: bool = False,
         progress_tracking_callback: Callable[[float], None] = None,
         window_size_samples: int = 512,
-        ):
+    ):
 
         """
         This method is used for splitting long audios into speech chunks using silero VAD
@@ -1417,25 +1483,35 @@ class SileroVAD:
             for i in range(len(audio.shape)):  # trying to squeeze empty dimensions
                 audio = audio.squeeze(0)
             if len(audio.shape) > 1:
-                raise ValueError("More than one dimension in audio. Are you trying to process audio with 2 channels?")
+                raise ValueError(
+                    "More than one dimension in audio. Are you trying to process audio with 2 channels?"
+                )
 
         if sampling_rate > 16000 and (sampling_rate % 16000 == 0):
             step = sampling_rate // 16000
             sampling_rate = 16000
             audio = audio[::step]
-            warnings.warn('Sampling rate is a multiply of 16000, casting to 16000 manually!')
+            warnings.warn(
+                "Sampling rate is a multiply of 16000, casting to 16000 manually!"
+            )
         else:
             step = 1
 
         if sampling_rate not in [8000, 16000]:
-            raise ValueError("Currently silero VAD models support 8000 and 16000 (or multiply of 16000) sample rates")
+            raise ValueError(
+                "Currently silero VAD models support 8000 and 16000 (or multiply of 16000) sample rates"
+            )
 
         window_size_samples = 512 if sampling_rate == 16000 else 256
 
         model.reset_states()
         min_speech_samples = sampling_rate * min_speech_duration_ms / 1000
         speech_pad_samples = sampling_rate * speech_pad_ms / 1000
-        max_speech_samples = sampling_rate * max_speech_duration_s - window_size_samples - 2 * speech_pad_samples
+        max_speech_samples = (
+            sampling_rate * max_speech_duration_s
+            - window_size_samples
+            - 2 * speech_pad_samples
+        )
         min_silence_samples = sampling_rate * min_silence_duration_ms / 1000
         min_silence_samples_at_max_speech = sampling_rate * 98 / 1000
 
@@ -1443,9 +1519,13 @@ class SileroVAD:
 
         speech_probs = []
         for current_start_sample in range(0, audio_length_samples, window_size_samples):
-            chunk = audio[current_start_sample: current_start_sample + window_size_samples]
+            chunk = audio[
+                current_start_sample : current_start_sample + window_size_samples
+            ]
             if len(chunk) < window_size_samples:
-                chunk = torch.nn.functional.pad(chunk, (0, int(window_size_samples - len(chunk))))
+                chunk = torch.nn.functional.pad(
+                    chunk, (0, int(window_size_samples - len(chunk)))
+                )
             speech_prob = model(chunk, sampling_rate).item()
             speech_probs.append(speech_prob)
             # caculate progress and seng it to callback function
@@ -1460,8 +1540,10 @@ class SileroVAD:
         speeches = []
         current_speech = {}
         neg_threshold = threshold - 0.15
-        temp_end = 0 # to save potential segment end (and tolerate some silence)
-        prev_end = next_start = 0 # to save potential segment limits in case of maximum segment size reached
+        temp_end = 0  # to save potential segment end (and tolerate some silence)
+        prev_end = (
+            next_start
+        ) = 0  # to save potential segment limits in case of maximum segment size reached
 
         for i, speech_prob in enumerate(speech_probs):
             if (speech_prob >= threshold) and temp_end:
@@ -1471,21 +1553,27 @@ class SileroVAD:
 
             if (speech_prob >= threshold) and not triggered:
                 triggered = True
-                current_speech['start'] = window_size_samples * i
+                current_speech["start"] = window_size_samples * i
                 continue
 
-            if triggered and (window_size_samples * i) - current_speech['start'] > max_speech_samples:
+            if (
+                triggered
+                and (window_size_samples * i) - current_speech["start"]
+                > max_speech_samples
+            ):
                 if prev_end:
-                    current_speech['end'] = prev_end
+                    current_speech["end"] = prev_end
                     speeches.append(current_speech)
                     current_speech = {}
-                    if next_start < prev_end: # previously reached silence (< neg_thres) and is still not speech (< thres)
+                    if (
+                        next_start < prev_end
+                    ):  # previously reached silence (< neg_thres) and is still not speech (< thres)
                         triggered = False
                     else:
-                        current_speech['start'] = next_start
+                        current_speech["start"] = next_start
                     prev_end = next_start = temp_end = 0
                 else:
-                    current_speech['end'] = window_size_samples * i
+                    current_speech["end"] = window_size_samples * i
                     speeches.append(current_speech)
                     current_speech = {}
                     prev_end = next_start = temp_end = 0
@@ -1495,45 +1583,60 @@ class SileroVAD:
             if (speech_prob < neg_threshold) and triggered:
                 if not temp_end:
                     temp_end = window_size_samples * i
-                if ((window_size_samples * i) - temp_end) > min_silence_samples_at_max_speech : # condition to avoid cutting in very short silence
+                if (
+                    (window_size_samples * i) - temp_end
+                ) > min_silence_samples_at_max_speech:  # condition to avoid cutting in very short silence
                     prev_end = temp_end
                 if (window_size_samples * i) - temp_end < min_silence_samples:
                     continue
                 else:
-                    current_speech['end'] = temp_end
-                    if (current_speech['end'] - current_speech['start']) > min_speech_samples:
+                    current_speech["end"] = temp_end
+                    if (
+                        current_speech["end"] - current_speech["start"]
+                    ) > min_speech_samples:
                         speeches.append(current_speech)
                     current_speech = {}
                     prev_end = next_start = temp_end = 0
                     triggered = False
                     continue
 
-        if current_speech and (audio_length_samples - current_speech['start']) > min_speech_samples:
-            current_speech['end'] = audio_length_samples
+        if (
+            current_speech
+            and (audio_length_samples - current_speech["start"]) > min_speech_samples
+        ):
+            current_speech["end"] = audio_length_samples
             speeches.append(current_speech)
 
         for i, speech in enumerate(speeches):
             if i == 0:
-                speech['start'] = int(max(0, speech['start'] - speech_pad_samples))
+                speech["start"] = int(max(0, speech["start"] - speech_pad_samples))
             if i != len(speeches) - 1:
-                silence_duration = speeches[i+1]['start'] - speech['end']
+                silence_duration = speeches[i + 1]["start"] - speech["end"]
                 if silence_duration < 2 * speech_pad_samples:
-                    speech['end'] += int(silence_duration // 2)
-                    speeches[i+1]['start'] = int(max(0, speeches[i+1]['start'] - silence_duration // 2))
+                    speech["end"] += int(silence_duration // 2)
+                    speeches[i + 1]["start"] = int(
+                        max(0, speeches[i + 1]["start"] - silence_duration // 2)
+                    )
                 else:
-                    speech['end'] = int(min(audio_length_samples, speech['end'] + speech_pad_samples))
-                    speeches[i+1]['start'] = int(max(0, speeches[i+1]['start'] - speech_pad_samples))
+                    speech["end"] = int(
+                        min(audio_length_samples, speech["end"] + speech_pad_samples)
+                    )
+                    speeches[i + 1]["start"] = int(
+                        max(0, speeches[i + 1]["start"] - speech_pad_samples)
+                    )
             else:
-                speech['end'] = int(min(audio_length_samples, speech['end'] + speech_pad_samples))
+                speech["end"] = int(
+                    min(audio_length_samples, speech["end"] + speech_pad_samples)
+                )
 
         if return_seconds:
             for speech_dict in speeches:
-                speech_dict['start'] = round(speech_dict['start'] / sampling_rate, 1)
-                speech_dict['end'] = round(speech_dict['end'] / sampling_rate, 1)
+                speech_dict["start"] = round(speech_dict["start"] / sampling_rate, 1)
+                speech_dict["end"] = round(speech_dict["end"] / sampling_rate, 1)
         elif step > 1:
             for speech_dict in speeches:
-                speech_dict['start'] *= step
-                speech_dict['end'] *= step
+                speech_dict["start"] *= step
+                speech_dict["end"] *= step
 
         if visualize_probs:
             self.make_visualization(speech_probs, window_size_samples / sampling_rate)
@@ -1541,13 +1644,18 @@ class SileroVAD:
         return speeches
 
     def make_visualization(probs, step):
-        pd.DataFrame({'probs': probs},
-                    index=[x * step for x in range(len(probs))]).plot(figsize=(16, 8),
-                    kind='area', ylim=[0, 1.05], xlim=[0, len(probs) * step],
-                    xlabel='seconds',
-                    ylabel='speech probability',
-                    colormap='tab20')
-    
+        pd.DataFrame(
+            {"probs": probs}, index=[x * step for x in range(len(probs))]
+        ).plot(
+            figsize=(16, 8),
+            kind="area",
+            ylim=[0, 1.05],
+            xlim=[0, len(probs) * step],
+            xlabel="seconds",
+            ylabel="speech probability",
+            colormap="tab20",
+        )
+
     def segment_speech(self, audio_segment, start_time, end_time, sampling_rate):
         """
         Segment speech from an audio segment and return a list of timestamps.
@@ -1687,7 +1795,7 @@ class SileroVAD:
 #########################################################
 #                    Dialog Pipeline                    #
 #########################################################
-# 
+#
 class DiaPipeline(_Pipeline):
     @classmethod
     def from_pretrained(
@@ -1974,6 +2082,7 @@ def pad_at_dim(t, pad, dim=-1, value=0.0):
     zeros = (0, 0) * dims_from_right
     return F.pad(t, (*zeros, *pad), value=value)
 
+
 class Attend(nn.Module):
     def __init__(self, dropout=0.0, flash=False):
         super().__init__()
@@ -2045,6 +2154,7 @@ class Attend(nn.Module):
 
         return out
 
+
 class RMSNorm(nn.Module):
     def __init__(self, dim):
         super().__init__()
@@ -2053,6 +2163,7 @@ class RMSNorm(nn.Module):
 
     def forward(self, x):
         return F.normalize(x, dim=-1) * self.scale * self.gamma
+
 
 class FeedForward(nn.Module):
     def __init__(self, dim, mult=4, dropout=0.0):
@@ -2069,6 +2180,7 @@ class FeedForward(nn.Module):
 
     def forward(self, x):
         return self.net(x)
+
 
 class Attention(nn.Module):
     def __init__(
@@ -2110,6 +2222,7 @@ class Attention(nn.Module):
 
         out = rearrange(out, "b h n d -> b n (h d)")
         return self.to_out(out)
+
 
 class Transformer(nn.Module):
     def __init__(
@@ -2156,6 +2269,7 @@ class Transformer(nn.Module):
 
         return self.norm(x)
 
+
 class BandSplit(nn.Module):
     def __init__(self, dim, dim_inputs: Tuple[int, ...]):
         super().__init__()
@@ -2177,6 +2291,7 @@ class BandSplit(nn.Module):
 
         return torch.stack(outs, dim=-2)
 
+
 def MLP(dim_in, dim_out, dim_hidden=None, depth=1, activation=nn.Tanh):
     dim_hidden = default(dim_hidden, dim_in)
 
@@ -2194,6 +2309,7 @@ def MLP(dim_in, dim_out, dim_hidden=None, depth=1, activation=nn.Tanh):
         net.append(activation())
 
     return nn.Sequential(*net)
+
 
 class MaskEstimator(nn.Module):
     def __init__(self, dim, dim_inputs: Tuple[int, ...], depth, mlp_expansion_factor=4):
@@ -2221,6 +2337,7 @@ class MaskEstimator(nn.Module):
             outs.append(freq_out)
 
         return torch.cat(outs, dim=-1)
+
 
 class MelBandRoformer(nn.Module):
     def __init__(
@@ -2316,9 +2433,7 @@ class MelBandRoformer(nn.Module):
         # create mel filter bank
         # with librosa.filters.mel as in section 2 of paper
 
-        mel_filter_bank_numpy = mel(
-            sr=sample_rate, n_fft=stft_n_fft, n_mels=num_bands
-        )
+        mel_filter_bank_numpy = mel(sr=sample_rate, n_fft=stft_n_fft, n_mels=num_bands)
 
         mel_filter_bank = torch.from_numpy(mel_filter_bank_numpy)
 
@@ -2575,6 +2690,7 @@ class MelBandRoformer(nn.Module):
 
         return total_loss, (loss, multi_stft_resolution_loss)
 
+
 class Predictor:
     """
     Predictor class for source separation using MelBandRoformer
@@ -2590,7 +2706,7 @@ class Predictor:
         self.device = device
         if device == "cuda":
             self.model = self.model.to(device)
-            
+
         elif device == "cpu":
             print(
                 "CUDA is not available. Run inference on CPU. It will be very slow..."
@@ -2760,6 +2876,7 @@ class Predictor:
 #                     DeEcho & DeReverb                 #
 #########################################################
 
+
 class Config:
     def __new__(cls):
         if not hasattr(cls, "_instance"):
@@ -2825,6 +2942,7 @@ class Config:
             self.is_half = False
         return self.params_config()
 
+
 class ModelParameters(object):
     def __init__(self, config_dict):
 
@@ -2877,6 +2995,7 @@ class Conv2DBNActiv(nn.Module):
     def __call__(self, x):
         return self.conv(x)
 
+
 class Encoder(nn.Module):
     def __init__(self, nin, nout, ksize=3, stride=1, pad=1, activ=nn.LeakyReLU):
         super(Encoder, self).__init__()
@@ -2890,6 +3009,7 @@ class Encoder(nn.Module):
             return h, skip
         else:
             return h
+
 
 class SeperableConv2DBNActiv(nn.Module):
     def __init__(self, nin, nout, ksize=3, stride=1, pad=1, dilation=1, activ=nn.ReLU):
@@ -2913,18 +3033,27 @@ class SeperableConv2DBNActiv(nn.Module):
     def __call__(self, x):
         return self.conv(x)
 
+
 class ASPPModule(nn.Module):
-    def __init__(self, nin, nout, dilations=(4, 8, 12), activ=nn.ReLU, ds_conv=False, dropout=False):
+    def __init__(
+        self,
+        nin,
+        nout,
+        dilations=(4, 8, 12),
+        activ=nn.ReLU,
+        ds_conv=False,
+        dropout=False,
+    ):
         super(ASPPModule, self).__init__()
         self.ds_conv = ds_conv
-        
-        if ds_conv:    
+
+        if ds_conv:
             hidden = nin
             conv_type = SeperableConv2DBNActiv
         else:
-            hidden = nout 
+            hidden = nout
             conv_type = Conv2DBNActiv
-        
+
         self.conv1 = nn.Sequential(
             nn.AdaptiveAvgPool2d((1, None)),
             Conv2DBNActiv(nin, hidden, 1, 1, 0, activ=activ),
@@ -2964,6 +3093,7 @@ class ASPPModule(nn.Module):
 
         return out
 
+
 class Decoder(nn.Module):
     def __init__(
         self, nin, nout, ksize=3, stride=1, pad=1, activ=nn.ReLU, dropout=False
@@ -2983,6 +3113,7 @@ class Decoder(nn.Module):
             h = self.dropout(h)
 
         return h
+
 
 class NewDecoder(nn.Module):
     def __init__(
@@ -3005,6 +3136,7 @@ class NewDecoder(nn.Module):
             h = self.dropout(h)
 
         return h
+
 
 class BaseASPPNet(nn.Module):
     def __init__(self, nin, ch, dilations=(4, 8, 16)):
@@ -3036,6 +3168,7 @@ class BaseASPPNet(nn.Module):
 
         return h
 
+
 class LSTMModule(nn.Module):
     def __init__(self, nin_conv, nin_lstm, nout_lstm):
         super(LSTMModule, self).__init__()
@@ -3057,6 +3190,7 @@ class LSTMModule(nn.Module):
         h = h.permute(1, 2, 3, 0)
 
         return h
+
 
 class BaseNet(nn.Module):
     def __init__(
@@ -3093,6 +3227,7 @@ class BaseNet(nn.Module):
         h = self.dec1(h, e1)
 
         return h
+
 
 class CascadedNet(nn.Module):
     def __init__(self, n_fft, nout=32, nout_lstm=128):
@@ -3184,6 +3319,7 @@ class CascadedNet(nn.Module):
 
         return pred_mag
 
+
 class CascadedASPPNet(nn.Module):
     def __init__(self, n_fft):
         super(CascadedASPPNet, self).__init__()
@@ -3269,6 +3405,7 @@ class CascadedASPPNet(nn.Module):
 
         return h
 
+
 class AudioPreprocess:
     def __init__(self, model_name, model_state_dict, agg, tta=False, device=None):
         self.data = {
@@ -3332,6 +3469,7 @@ class AudioPreprocess:
         spec = np.asfortranarray([spec_left, spec_right])
 
         return spec
+
     @staticmethod
     def _fft_lp_filter(spec, bin_start, bin_stop):
         g = 1.0
@@ -3342,7 +3480,7 @@ class AudioPreprocess:
         spec[:, bin_stop:, :] *= 0
 
         return spec
-    
+
     def _combine_spectrograms(self, specs, mp):
         l = min([specs[i].shape[2] for i in specs])
         spec_c = np.zeros(shape=(2, mp.param["bins"] + 1, l), dtype=np.complex64)
@@ -3352,7 +3490,9 @@ class AudioPreprocess:
         for d in range(1, bands_n + 1):
             h = mp.param["band"][d]["crop_stop"] - mp.param["band"][d]["crop_start"]
             spec_c[:, offset : offset + h, :l] = specs[d][
-                :, mp.param["band"][d]["crop_start"] : mp.param["band"][d]["crop_stop"], :l
+                :,
+                mp.param["band"][d]["crop_start"] : mp.param["band"][d]["crop_stop"],
+                :l,
             ]
             offset += h
 
@@ -3379,7 +3519,7 @@ class AudioPreprocess:
                     spec_c[:, b, :] *= g
 
         return np.asfortranarray(spec_c)
-    
+
     def process(
         self, music_file,
     ):
@@ -3583,7 +3723,9 @@ class AudioPreprocess:
             else:
                 sr = mp.param["band"][d + 1]["sr"]
                 if d == 1:  # lower
-                    spec_s = self._fft_lp_filter(spec_s, bp["lpf_start"], bp["lpf_stop"])
+                    spec_s = self._fft_lp_filter(
+                        spec_s, bp["lpf_start"], bp["lpf_stop"]
+                    )
                     wave = librosa.resample(
                         self.spectrogram_to_wave(
                             spec_s,
@@ -3600,7 +3742,9 @@ class AudioPreprocess:
                     spec_s = self.fft_hp_filter(
                         spec_s, bp["hpf_start"], bp["hpf_stop"] - 1
                     )
-                    spec_s = self._fft_lp_filter(spec_s, bp["lpf_start"], bp["lpf_stop"])
+                    spec_s = self._fft_lp_filter(
+                        spec_s, bp["lpf_start"], bp["lpf_stop"]
+                    )
                     wave2 = np.add(
                         wave,
                         self.spectrogram_to_wave(
@@ -3611,7 +3755,6 @@ class AudioPreprocess:
                             mp.param["reverse"],
                         ),
                     )
-                    # wave = librosa.core.resample(wave2, orig_sr=bp['sr'], target_sr=sr)
                     wave = librosa.core.resample(
                         wave2, orig_sr=bp["sr"], target_sr=sr, res_type="sinc_fastest"
                     )
@@ -3709,6 +3852,7 @@ class AudioPreprocess:
         else:
             return pred * coef, X_mag, np.exp(1.0j * X_phase)
 
+
 class Dereverb:
     def __init__(self, model_name, model_state_dict, device):
         self.model = AudioPreprocess(
@@ -3733,17 +3877,17 @@ class Dereverb:
                 parameters=["-ar", "44100"],
             )
         results = self.model.process(audio if tmp_path is None else tmp_path)
-        
+
         if tmp_path is not None:
             os.remove(tmp_path)
         shutil.rmtree(tmp_path_root, ignore_errors=True)
         return results
 
 
-
 #########################################################
 #                       SOFA MFA                        #
 #########################################################
+
 
 class LoudnessSpectralcentroidAPDetector:
     def __init__(self):
@@ -3966,6 +4110,7 @@ class DictionaryG2P:
             item.split("\t")[0]: item.split("\t")[1].strip().split(" ")
             for item in dictionary.split("\n")
         }
+
     def __call__(self, text):
         ph_seq, word_seq, ph_idx_to_word_idx = self._g2p(text)
 
@@ -3992,10 +4137,10 @@ class DictionaryG2P:
                         encoding="utf-8",
                     ) as f:
                         lab_text = f.read().strip()
-                    if self.in_format == 'txt':
+                    if self.in_format == "txt":
                         raw_text, lab_text = chinese_to_ipa(lab_text)
-                        raw_text = ' '.join(raw_text)
-                        lab_text = ' '.join(lab_text)
+                        raw_text = " ".join(raw_text)
+                        lab_text = " ".join(lab_text)
                     ph_seq, word_seq, ph_idx_to_word_idx = self(lab_text)
                     dataset.append((wav_path, ph_seq, word_seq, ph_idx_to_word_idx))
             except Exception as e:
@@ -4278,6 +4423,7 @@ def add_SP(word_seq, word_intervals, wav_length):
 
     return word_seq_res, word_intervals_res
 
+
 def fill_small_gaps(word_seq, word_intervals, wav_length):
     if word_intervals[0, 0] > 0:
         if word_intervals[0, 0] < MIN_SP_LENGTH:
@@ -4313,6 +4459,7 @@ def fill_small_gaps(word_seq, word_intervals, wav_length):
             word_intervals[-1, 1] = wav_length
 
     return word_seq, word_intervals
+
 
 def post_processing(predictions):
     print("Post-processing...")
@@ -4352,6 +4499,7 @@ def post_processing(predictions):
         except Exception as e:
             error_log.append([wav_path, e])
     return res, error_log
+
 
 class ResidualBasicBlock(nn.Module):
     def __init__(self, input_dims, output_dims, hidden_dims=None, n_groups=16):
@@ -4393,6 +4541,7 @@ class ResidualBasicBlock(nn.Module):
         x = self.block(x.transpose(1, 2)).transpose(1, 2) + self.shortcut(x)
         x = self.out(x)
         return x
+
 
 class ResidualBottleNeckBlock(nn.Module):
     def __init__(self, input_dims, output_dims, hidden_dims=None, n_groups=16):
@@ -4437,6 +4586,7 @@ class ResidualBottleNeckBlock(nn.Module):
         h = self.output_proj(h)
         return self.out(h + self.shortcut(x))
 
+
 class DownSampling(nn.Module):
     def __init__(self, input_dims, output_dims, down_sampling_factor=2):
         super(DownSampling, self).__init__()
@@ -4459,6 +4609,7 @@ class DownSampling(nn.Module):
             x = nn.functional.pad(x, (0, self.down_sampling_factor - padding_len))
         return self.conv(x).transpose(1, 2)
 
+
 class UpSampling(nn.Module):
     def __init__(self, input_dims, output_dims, up_sampling_factor=2):
         super(UpSampling, self).__init__()
@@ -4476,6 +4627,7 @@ class UpSampling(nn.Module):
 
     def forward(self, x):
         return self.conv(x.transpose(1, 2)).transpose(1, 2)
+
 
 class UNetBackbone(nn.Module):
     def __init__(
@@ -4588,6 +4740,7 @@ class UNetBackbone(nn.Module):
 
         return out
 
+
 class MelSpectrogram(torch.nn.Module):
     def __init__(
         self,
@@ -4660,6 +4813,7 @@ class MelSpectrogram(torch.nn.Module):
 
 
 melspec_transform = None
+
 
 class MelSpecExtractor:
     def __init__(
@@ -4790,7 +4944,10 @@ class LitForcedAlignmentTask(pl.LightningModule):
             for i in range(prob3_pad_len):
                 prob3[i] = -np.inf
             for i in range(prob3_pad_len, S):
-                if i - prob3_pad_len + 1 < S - 1 and ph_seq_id[i - prob3_pad_len + 1] != 0:
+                if (
+                    i - prob3_pad_len + 1 < S - 1
+                    and ph_seq_id[i - prob3_pad_len + 1] != 0
+                ):
                     prob3[i] = -np.inf
                 else:
                     prob3[i] = (
@@ -4818,7 +4975,9 @@ class LitForcedAlignmentTask(pl.LightningModule):
 
             for i in range(S):
                 if backtrack_s[t, i] == 0:
-                    curr_ph_max_prob_log[i] = max(curr_ph_max_prob_log[i], prob_log[t, i])
+                    curr_ph_max_prob_log[i] = max(
+                        curr_ph_max_prob_log[i], prob_log[t, i]
+                    )
                 elif backtrack_s[t, i] > 0:
                     curr_ph_max_prob_log[i] = prob_log[t, i]
 
@@ -5128,12 +5287,13 @@ class LitForcedAlignmentTask(pl.LightningModule):
 
 
 #########################################################
-# NOTE                以上代码无需修改                   #
+# !!!            DO NOT MODIFIED UPON CODES             #
 #########################################################
 #                       main utils                      #
-#-------------------------------------------------------#
+# ------------------------------------------------------#
 #                       postprocess                     #
 #########################################################
+
 
 def standardization(audio, sr=44100):
     """
@@ -5200,6 +5360,7 @@ def standardization(audio, sr=44100):
         "sample_rate": sr,
     }
 
+
 def source_separation(predictor, audio):
     """
     Separate the audio into vocals and non-vocals using the given predictor.
@@ -5227,6 +5388,7 @@ def source_separation(predictor, audio):
     audio["company"] = no_vocals
     return audio
 
+
 def calculate_silence_duration(audio, sr, top_db=30, frame_length=2048, hop_length=512):
     """
     Args:
@@ -5242,37 +5404,38 @@ def calculate_silence_duration(audio, sr, top_db=30, frame_length=2048, hop_leng
     """
     if len(audio.shape) > 1:
         audio = np.mean(audio, axis=1)
-    
+
     # cal frame energy
     n_frames = 1 + (len(audio) - frame_length) // hop_length
     frames = np.lib.stride_tricks.as_strided(
         audio,
         shape=(n_frames, frame_length),
-        strides=(audio.strides[0] * hop_length, audio.strides[0])
+        strides=(audio.strides[0] * hop_length, audio.strides[0]),
     )
-    frame_energies = 10 * np.log10(np.mean(frames**2, axis=1))  # dB计算
-    
+    frame_energies = 10 * np.log10(np.mean(frames ** 2, axis=1))  # dB计算
+
     # silent detect
     silence_frames = frame_energies < -top_db
     silence_samples = np.sum(silence_frames) * hop_length
-    
+
     if (n_frames * hop_length + frame_length) > len(audio):
         last_frame = audio[-frame_length:]
-        last_energy = 10 * np.log10(np.mean(last_frame**2))
+        last_energy = 10 * np.log10(np.mean(last_frame ** 2))
         if last_energy < -top_db:
             silence_samples += len(audio) - (n_frames * hop_length)
-    
+
     silence_duration = silence_samples / sr
     total_duration = len(audio) / sr
     silence_proportion = silence_duration / total_duration
-    
+
     return silence_duration, silence_proportion
-    
+
+
 def dereverb(dereverb_model, audio, is_dereverb=False):
     """
     Perform dereverberation on the given audio.
     """
-    
+
     # save audio to temp file
     temp_dir = Path(__file__).parent / "temp"
     if not temp_dir.exists():
@@ -5287,17 +5450,18 @@ def dereverb(dereverb_model, audio, is_dereverb=False):
         # NOTE
         silent_dur0, _ = calculate_silence_duration(results[0], audio["sample_rate"])
         silent_dur1, _ = calculate_silence_duration(results[1], audio["sample_rate"])
-        
+
         if silent_dur0 > silent_dur1:
             audio["waveform"] = np.array(results[1], dtype=np.float32)
         else:
             audio["waveform"] = np.array(results[0], dtype=np.float32)
-        
+
     audio["sample_rate"] = results[2]
-    
+
     os.remove(temp_file)
     shutil.rmtree(temp_dir, ignore_errors=True)
     return audio
+
 
 def speaker_diarization(dia_pipeline, audio, device="cuda:0"):
     """
@@ -5324,6 +5488,7 @@ def speaker_diarization(dia_pipeline, audio, device="cuda:0"):
     diarize_df["end"] = diarize_df["segment"].apply(lambda x: x.end)
 
     return diarize_df
+
 
 def cut_by_speaker_label(vad_list):
     """
@@ -5381,11 +5546,13 @@ def cut_by_speaker_label(vad_list):
 
     return filter_list
 
+
 def number_to_chinese(text):
     numbers = re.findall(r"\d+(?:\.?\d+)?", text)
     for number in numbers:
         text = text.replace(number, cn2an.an2cn(number), 1)
     return text
+
 
 def add_spaces_around_chinese(text):
     # 定义正则表达式模式，用于匹配中文字符
@@ -5398,6 +5565,7 @@ def add_spaces_around_chinese(text):
     modified_text = re.sub(r"\s+", " ", modified_text).strip()
 
     return modified_text
+
 
 def chinese_to_pinyin(text):
     text = re.sub(r"[^\w\s]|_", "", text)
@@ -5421,6 +5589,7 @@ def chinese_to_pinyin(text):
                 g2p_text.append(_pinyins)
     return raw_text, g2p_text
 
+
 def chinese_to_ipa(text):
     try:
         text = number_to_chinese(text)
@@ -5428,6 +5597,7 @@ def chinese_to_ipa(text):
         text = ""
     raw_text, g2p_text = chinese_to_pinyin(text)
     return raw_text, g2p_text
+
 
 def asr(asr_model, vad_segments, audio, batch_size=16, multilingual_flag=False):
     """
@@ -5474,12 +5644,16 @@ def asr(asr_model, vad_segments, audio, batch_size=16, multilingual_flag=False):
         result[idx]["start"] += start_time
         result[idx]["end"] += start_time
         result[idx]["language"] = transcribe_result["language"]
-        result[idx]["text"], result[idx]["phoneme"] = chinese_to_ipa(result[idx]["text"])
+        result[idx]["text"], result[idx]["phoneme"] = chinese_to_ipa(
+            result[idx]["text"]
+        )
     return result
+
 
 def write_wav(path, sr, x):
     """Write numpy array to WAV file."""
     sf.write(path, x, sr)
+
 
 def export_to_wav(audio, asr_result, folder_path, file_name):
     """Export segmented audio to WAV files."""
@@ -5487,10 +5661,11 @@ def export_to_wav(audio, asr_result, folder_path, file_name):
     company = audio["company"]
     audio = audio["waveform"]
     os.makedirs(folder_path, exist_ok=True)
-    save_file_path = os.path.join(folder_path, file_name + ".wav")
-    save_company_path = os.path.join(folder_path, file_name + "_伴奏.wav")
+    save_file_path = os.path.join(folder_path, file_name + "_vocal.wav")
+    save_company_path = os.path.join(folder_path, file_name + "_accomp.wav")
     write_wav(save_file_path, sr, audio)
     write_wav(save_company_path, sr, company)
+
 
 def singing_voice_separate(
     source_separater,
@@ -5530,11 +5705,12 @@ def singing_voice_separate(
 
     audio = source_separation(source_separater, audio)
 
-    audio = dereverb(echo_seprater, audio, False)       # False
+    audio = dereverb(echo_seprater, audio, False)  # False
     audio = dereverb(dereverb_model, audio, True)
     if save:
         export_to_wav(audio, None, save_path, audio_name)
     return audio, save_path, audio_name
+
 
 def get_audio_files(folder_path):
     """Get all audio files in a folder."""
@@ -5555,8 +5731,8 @@ def get_audio_files(folder_path):
 
     return audio_files
 
+
 def interp_f0(f0, uv=None):
-    
     def denorm_f0(f0, uv, pitch_padding=None):
         f0 = 2 ** f0
         if uv is not None:
@@ -5564,7 +5740,7 @@ def interp_f0(f0, uv=None):
         if pitch_padding is not None:
             f0[pitch_padding] = 0
         return f0
-    
+
     if uv is None:
         uv = f0 == 0
     f0 = f0 = np.log2(f0)
@@ -5573,6 +5749,7 @@ def interp_f0(f0, uv=None):
     elif sum(uv) > 0:
         f0[uv] = np.interp(np.where(uv)[0], np.where(~uv)[0], f0[~uv])
     return denorm_f0(f0, uv=None), uv
+
 
 def get_pitch_parselmouth(wav_data, hop_size, audio_sample_rate, interp_uv=True):
     time_step = hop_size / audio_sample_rate
@@ -5595,7 +5772,9 @@ def get_pitch_parselmouth(wav_data, hop_size, audio_sample_rate, interp_uv=True)
         f0, uv = interp_f0(f0, uv)
     return time_step, f0, uv
 
+
 resample_transform_dict = {}
+
 
 def load_wav(path, device, sample_rate=None):
     waveform, sr = torchaudio.load(str(path))
@@ -5610,6 +5789,7 @@ def load_wav(path, device, sample_rate=None):
 
     waveform = waveform[0].to(device)
     return waveform
+
 
 def get_pitch(algorithm, wav_data, hop_size, audio_sample_rate, interp_uv=True):
     if algorithm == "parselmouth":
@@ -5626,7 +5806,7 @@ def build_dataset(wavs, tg, dataset, skip_silence_insertion=True, wav_subtype="P
     del tg
     dataset = Path(dataset)
     filelist = list(wavs.glob("*.wav"))
-    
+
     dataset.mkdir(parents=True, exist_ok=True)
     (dataset / "wavs").mkdir(exist_ok=True)
     transcriptions = []
@@ -5638,29 +5818,25 @@ def build_dataset(wavs, tg, dataset, skip_silence_insertion=True, wav_subtype="P
         tgfile = tg_dir / wavfile.with_suffix(".TextGrid").name
 
         if not tgfile.exists():
-            # tgt_file = dataset / "wavs" / wavfile.name
-            # if tgt_file.exists():
-            #     tgt_file.unlink()
-            # shutil.move(wavfile, dataset / "wavs")
             continue
         tg = TextGrid()
         tg.read(str(tgfile))
-        
+
         word_seq = [w.mark.strip() for w in tg[0]]
-        with open(str(wavfile).replace("wav",'txt'), 'r') as f_word:
+        with open(str(wavfile).replace("wav", "txt"), "r") as f_word:
             text_seq = f_word.readline().strip().split(" ")
         new_text_seq = []
-        
+
         for idx, w in enumerate(word_seq):
-            if w in ['SP', 'AP']:
+            if w in ["SP", "AP"]:
                 new_text_seq.append(w.strip())
             else:
                 new_text_seq.append(text_seq.pop(0).strip())
-            
+
         word_dur = [w.maxTime - w.minTime for w in tg[0]]
         ph_seq = [ph.mark for ph in tg[1]]
         ph_dur = [ph.maxTime - ph.minTime for ph in tg[1]]
-        
+
         if not skip_silence_insertion:
             if random.random() < 0.5:
                 len_sil = random.randrange(min_sil, max_sil)
@@ -5678,23 +5854,33 @@ def build_dataset(wavs, tg, dataset, skip_silence_insertion=True, wav_subtype="P
                 else:
                     ph_seq.append("SP")
                     ph_dur.append(len_sil / samplerate)
-        
+
         new_text_seq = " ".join(new_text_seq)
         word_seq = " ".join(word_seq)
         word_dur = " ".join([str(round(d, 6)) for d in word_dur])
         ph_seq = " ".join(ph_seq)
         ph_dur = " ".join([str(round(d, 6)) for d in ph_dur])
         sf.write(dataset / "wavs" / wavfile.name, y, samplerate, subtype=wav_subtype)
-        
-        
+
         transcriptions.append(
-            {"name": wavfile.stem,"text_seq":new_text_seq ,"word_seq":word_seq, "word_dur":word_dur, "ph_dur": ph_dur, "ph_seq": ph_seq}
+            {
+                "name": wavfile.stem,
+                "text_seq": new_text_seq,
+                "word_seq": word_seq,
+                "word_dur": word_dur,
+                "ph_dur": ph_dur,
+                "ph_seq": ph_seq,
+            }
         )
 
     with open(dataset / "transcriptions.csv", "w", encoding="utf8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["name", "text_seq", "word_seq","word_dur", "ph_seq", "ph_dur"])
+        writer = csv.DictWriter(
+            f,
+            fieldnames=["name", "text_seq", "word_seq", "word_dur", "ph_seq", "ph_dur"],
+        )
         writer.writeheader()
         writer.writerows(transcriptions)
+
 
 def add_ph_num(transcription):
     global dictionary
@@ -5714,7 +5900,7 @@ def add_ph_num(transcription):
         else:
             consonants.add(phonemes[0])
             vowels.add(phonemes[1])
-    
+
     transcription = Path(transcription)
     items: list[dict] = []
     with open(transcription, "r", encoding="utf8") as f:
@@ -5726,7 +5912,7 @@ def add_ph_num(transcription):
         item: dict
         ph_seq = item["ph_seq"].split()
         word_seq = item["word_seq"].split()
-        
+
         for ph in ph_seq:
             assert (
                 ph in vowels or ph in consonants
@@ -5741,19 +5927,18 @@ def add_ph_num(transcription):
             i = j
         item["ph_num"] = " ".join(ph_num)
         item["word2ph"] = " ".join([str(len(word2ph[i])) for i in word_seq])
-        
 
     with open(transcription, "w", encoding="utf8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=items[0].keys())
         writer.writeheader()
         writer.writerows(items)
 
-# TODO 改成SOME
+
+# TODO: modified to `SOME`, and `RMVPE`
+
+
 def estimate_midi(
-    transcriptions,
-    waveforms,
-    pe: str = "parselmouth",
-    rest_uv_ratio: float = 0.85,
+    transcriptions, waveforms, pe: str = "parselmouth", rest_uv_ratio: float = 0.85,
 ):
     transcriptions = Path(transcriptions)
     waveforms = Path(waveforms)
@@ -5819,13 +6004,26 @@ def estimate_midi(
 
         item["note_seq"] = " ".join(note_seq)
         item["note_dur"] = " ".join([str(round(d, 6)) for d in note_dur])
-        
+
     with open(transcriptions, "w", encoding="utf8", newline="") as f:
         writer = csv.DictWriter(
-            f, fieldnames=["name", "text_seq", "word_seq","word2ph", "word_dur", "ph_seq", "ph_dur", "ph_num", "note_seq", "note_dur"]
+            f,
+            fieldnames=[
+                "name",
+                "text_seq",
+                "word_seq",
+                "word2ph",
+                "word_dur",
+                "ph_seq",
+                "ph_dur",
+                "ph_num",
+                "note_seq",
+                "note_dur",
+            ],
         )
         writer.writeheader()
         writer.writerows(items)
+
 
 def try_resolve_note_slur_by_matching(ph_dur, ph_num, note_dur, tol):
     if len(ph_num) > len(note_dur):
@@ -5857,6 +6055,7 @@ def try_resolve_note_slur_by_matching(ph_dur, ph_num, note_dur, tol):
     ret_note_dur = np.diff(new_note_dur, prepend=Decimal("0.0")).tolist()
     assert len(ret_note_dur) == len(note_slur)
     return ret_note_dur, note_slur
+
 
 def try_resolve_slur_by_slicing(ph_dur, ph_num, note_seq, note_dur, tol):
     ph_num_cum = np.cumsum([0] + ph_num)
@@ -5898,6 +6097,7 @@ def try_resolve_slur_by_slicing(ph_dur, ph_num, note_seq, note_dur, tol):
     ret_note_dur = np.diff(new_note_dur, prepend=Decimal("0.0")).tolist()
     assert len(new_note_seq) == len(ret_note_dur) == len(note_slur)
     return new_note_seq, ret_note_dur, note_slur
+
 
 def csv2ds(
     transcription_file,
@@ -5984,15 +6184,25 @@ def csv2ds(
             out_ds[ds_fn] = ds_content
             if ds_fn.exists():
                 out_exists.append(ds_fn)
-    # if not out_exists or click.confirm(f"Overwrite {len(out_exists)} existing DS files?", abort=False):
     for ds_fn, ds_content in out_ds.items():
         with open(ds_fn, "w", encoding="utf-8") as f:
             json.dump(ds_content, f, ensure_ascii=False, indent=4)
 
+
 def enhance_tg(
-        wavs, src, dst,
-        f0_min=40., f0_max=1300., br_len=0.1, br_db=-60, br_centroid=2000,
-        time_step=0.005, min_space=0.04, voicing_thresh_vowel=0.45, voicing_thresh_breath=0.6, br_win_sz=0.05
+    wavs,
+    src,
+    dst,
+    f0_min=40.0,
+    f0_max=1300.0,
+    br_len=0.1,
+    br_db=-60,
+    br_centroid=2000,
+    time_step=0.005,
+    min_space=0.04,
+    voicing_thresh_vowel=0.45,
+    voicing_thresh_breath=0.6,
+    br_win_sz=0.05,
 ):
     global dictionary
     wavs = Path(wavs)
@@ -6000,8 +6210,8 @@ def enhance_tg(
     dst = Path(dst)
     dst.mkdir(parents=True, exist_ok=True)
 
-    rules = [item.strip().split('\t') for item in dictionary.split("\n")]
-    
+    rules = [item.strip().split("\t") for item in dictionary.split("\n")]
+
     dictionary_entg = {}
     phoneme_set = set()
     for r in rules:
@@ -6009,12 +6219,12 @@ def enhance_tg(
         dictionary_entg[r[0]] = phonemes
         phoneme_set.update(phonemes)
 
-    filelist = list(wavs.glob('*.wav'))
+    filelist = list(wavs.glob("*.wav"))
     for wavfile in tqdm.tqdm(filelist):
-        tgfile = src / wavfile.with_suffix('.TextGrid').name
+        tgfile = src / wavfile.with_suffix(".TextGrid").name
         if not tgfile.exists():
             continue
-        
+
         textgrid = TextGrid()
         textgrid.read(str(tgfile))
         words = textgrid[0]
@@ -6025,23 +6235,25 @@ def enhance_tg(
             voicing_threshold=voicing_thresh_breath,
             pitch_floor=f0_min,
             pitch_ceiling=f0_max,
-        ).selected_array['frequency']
+        ).selected_array["frequency"]
         f0_voicing_vowel = sound.to_pitch_ac(
             time_step=time_step,
             voicing_threshold=voicing_thresh_vowel,
             pitch_floor=f0_min,
             pitch_ceiling=f0_max,
-        ).selected_array['frequency']
+        ).selected_array["frequency"]
         y, sr = librosa.load(wavfile, sr=24000, mono=True)
         hop_size = int(time_step * sr)
-        spectral_centroid = librosa.feature.spectral_centroid(y=y, sr=sr, n_fft=2048, hop_length=hop_size).squeeze(0)
+        spectral_centroid = librosa.feature.spectral_centroid(
+            y=y, sr=sr, n_fft=2048, hop_length=hop_size
+        ).squeeze(0)
 
         # Fix long utterances
         i = j = 0
         while i < len(words):
             word = words[i]
             phone = phones[j]
-            if word.mark is not None and word.mark != '':
+            if word.mark is not None and word.mark != "":
                 i += 1
                 j += len(dictionary_entg[word.mark])
                 continue
@@ -6068,7 +6280,7 @@ def enhance_tg(
         while i < len(words):
             word = words[i]
             phone = phones[j]
-            if word.mark is not None and word.mark != '':
+            if word.mark is not None and word.mark != "":
                 i += 1
                 j += len(dictionary_entg[word.mark])
                 continue
@@ -6080,10 +6292,21 @@ def enhance_tg(
             br_start = None
             win_pos = word.minTime
             while win_pos + br_win_sz <= word.maxTime:
-                all_noisy = (f0_voicing_breath[
-                             int(win_pos / time_step): int((win_pos + br_win_sz) / time_step)] < f0_min).all()
+                all_noisy = (
+                    f0_voicing_breath[
+                        int(win_pos / time_step) : int(
+                            (win_pos + br_win_sz) / time_step
+                        )
+                    ]
+                    < f0_min
+                ).all()
                 rms_db = 20 * np.log10(
-                    np.clip(sound.get_rms(from_time=win_pos, to_time=win_pos + br_win_sz), a_min=1e-12, a_max=1))
+                    np.clip(
+                        sound.get_rms(from_time=win_pos, to_time=win_pos + br_win_sz),
+                        a_min=1e-12,
+                        a_max=1,
+                    )
+                )
                 # print(win_pos, win_pos + br_win_sz, all_noisy, rms_db)
                 if all_noisy and rms_db >= br_db:
                     if br_start is None:
@@ -6092,7 +6315,9 @@ def enhance_tg(
                     if br_start is not None:
                         br_end = win_pos + br_win_sz - time_step
                         if br_end - br_start >= br_len:
-                            centroid = spectral_centroid[int(br_start / time_step): int(br_end / time_step)].mean()
+                            centroid = spectral_centroid[
+                                int(br_start / time_step) : int(br_end / time_step)
+                            ].mean()
                             if centroid >= br_centroid:
                                 ap_ranges.append((br_start, br_end))
                         br_start = None
@@ -6101,7 +6326,9 @@ def enhance_tg(
             if br_start is not None:
                 br_end = win_pos + br_win_sz - time_step
                 if br_end - br_start >= br_len:
-                    centroid = spectral_centroid[int(br_start / time_step): int(br_end / time_step)].mean()
+                    centroid = spectral_centroid[
+                        int(br_start / time_step) : int(br_end / time_step)
+                    ].mean()
                     if centroid >= br_centroid:
                         ap_ranges.append((br_start, br_end))
             # print(ap_ranges)
@@ -6122,8 +6349,8 @@ def enhance_tg(
                     phones.add(minTime=ap_ranges[k - 1][1], maxTime=ap[0], mark=None)
                     i += 1
                     j += 1
-                words.add(minTime=ap[0], maxTime=min(word.maxTime, ap[1]), mark='AP')
-                phones.add(minTime=ap[0], maxTime=min(word.maxTime, ap[1]), mark='AP')
+                words.add(minTime=ap[0], maxTime=min(word.maxTime, ap[1]), mark="AP")
+                phones.add(minTime=ap[0], maxTime=min(word.maxTime, ap[1]), mark="AP")
                 i += 1
                 j += 1
             if ap_ranges[-1][1] < word.maxTime:
@@ -6137,13 +6364,13 @@ def enhance_tg(
         while i < len(words):
             word = words[i]
             phone = phones[j]
-            if word.mark is not None and word.mark != '':
+            if word.mark is not None and word.mark != "":
                 i += 1
-                j += (1 if word.mark == 'AP' else len(dictionary_entg[word.mark]))
+                j += 1 if word.mark == "AP" else len(dictionary_entg[word.mark])
                 continue
             if word.maxTime - word.minTime >= min_space:
-                word.mark = 'SP'
-                phone.mark = 'SP'
+                word.mark = "SP"
+                phone.mark = "SP"
                 i += 1
                 j += 1
                 continue
@@ -6164,16 +6391,25 @@ def enhance_tg(
                 else:
                     break
             else:
-                words[i - 1].maxTime = words[i + 1].minTime = (word.minTime + word.maxTime) / 2
-                phones[j - 1].maxTime = phones[j + 1].minTime = (phone.minTime + phone.maxTime) / 2
+                words[i - 1].maxTime = words[i + 1].minTime = (
+                    word.minTime + word.maxTime
+                ) / 2
+                phones[j - 1].maxTime = phones[j + 1].minTime = (
+                    phone.minTime + phone.maxTime
+                ) / 2
                 words.removeInterval(word)
                 phones.removeInterval(phone)
         textgrid.write(str(dst / tgfile.name))
-        
+
+
 def postprocess(
     song_and_lyrics_path, align_out_path, dataset_path,
-    ):  
-    enhance_tg(song_and_lyrics_path,f"{align_out_path}/TextGrid", f"{align_out_path}/TextGrid_entg")
+):
+    enhance_tg(
+        song_and_lyrics_path,
+        f"{align_out_path}/TextGrid",
+        f"{align_out_path}/TextGrid_entg",
+    )
     build_dataset(song_and_lyrics_path, f"{align_out_path}/TextGrid_entg", dataset_path)
     add_ph_num(f"{dataset_path}/transcriptions.csv")
     estimate_midi(f"{dataset_path}/transcriptions.csv", f"{dataset_path}/wavs")
@@ -6183,23 +6419,25 @@ def postprocess(
 
 def get_sorted_files_with_prefix(folder_path, pattern="*.ds"):
     files = glob.glob(os.path.join(folder_path, pattern))
-    
+
     if not files:
         return None, []
-    
+
     first_file = os.path.basename(files[0])
-    prefix_match = re.match(r'^(.+?)_\d+\.ds$', first_file)
+    prefix_match = re.match(r"^(.+?)_\d+_vocal\.ds$", first_file)
     if not prefix_match:
         return None, []
-    
+
     prefix = prefix_match.group(1)
+
     def extract_number(file_path):
-        match = re.search(r'_(\d+)\.ds$', file_path)
+        match = re.search(r"_(\d+)_vocal\.ds$", file_path)
         if match:
             return int(match.group(1))
-        return 0 
+        return 0
+
     sorted_files = sorted(files, key=extract_number)
-    
+
     return prefix, sorted_files
 
 
@@ -6207,15 +6445,20 @@ def get_sorted_files_with_prefix(folder_path, pattern="*.ds"):
 #                       Core CLASS                      #
 #########################################################
 
+
 class SongEdit:
-    r""" 
+    r"""
+    A professional toolchain for AI-powered vocal editing and synthesis.
+    
     NOTE: 
-        1. 模型可能会出现分离失败的情况，遇到这种情况，会重新尝试，最大尝试5次。
+        1. The model may occasionally fail during vocal separation. 
+           In such cases, it will automatically retry (max 5 attempts).
     
     TODO: 
-        1. 使用RMVPE提取F0
-            目前合成模型是依赖输入歌曲的基频，根据原有基频去合成的，因此合成出来的, 由于采用ParselMouth F0提取鲁棒性差一点
-        2. 
+        1. Implement RMVPE for F0 extraction
+           - Current synthesis relies on input song's F0 contour using ParselMouth,
+             which has limited robustness compared to modern extractors
+        2. [Add other planned improvements here]
     """
 
     def __init__(
@@ -6232,28 +6475,31 @@ class SongEdit:
             device_name = "cpu"
         device = torch.device(device_name)
         self.device = device
-        
-        # 模型初始化
+
         print("Load checkpoints...")
-        separate_state_dict = torch.load(separate_model_path,map_location='cpu')
-        self.source_separater = Predictor(separate_state_dict['src_separate'], device=device_name)
-        deecho_ckpt = separate_state_dict['deecho']
-        dereverb_ckpt = separate_state_dict['dereverb']
-        
-        self.echo_seprater = Dereverb(model_name=deecho_ckpt['name'], 
-                                      model_state_dict=deecho_ckpt['state_dict'],
-                                      device=device_name)
-        
-        self.dereverb_model = Dereverb(
-            model_name=dereverb_ckpt['name'], 
-            model_state_dict=dereverb_ckpt['state_dict'], 
-            device=device_name
+        separate_state_dict = torch.load(separate_model_path, map_location="cpu")
+        self.source_separater = Predictor(
+            separate_state_dict["src_separate"], device=device_name
         )
-        
+        deecho_ckpt = separate_state_dict["deecho"]
+        dereverb_ckpt = separate_state_dict["dereverb"]
+
+        self.echo_seprater = Dereverb(
+            model_name=deecho_ckpt["name"],
+            model_state_dict=deecho_ckpt["state_dict"],
+            device=device_name,
+        )
+
+        self.dereverb_model = Dereverb(
+            model_name=dereverb_ckpt["name"],
+            model_state_dict=dereverb_ckpt["state_dict"],
+            device=device_name,
+        )
+
         self.dia_pipeline = DiaPipeline.from_pretrained(
             checkpoint_path=spk_dia_model_path
         ).to(device)
-        
+
         self.asr_model = load_asr_model(
             asr_model_path,
             device_name,
@@ -6263,11 +6509,11 @@ class SongEdit:
                 "initial_prompt": "Um, Uh, Ah. Like, you know. I mean, right. Actually. Basically, and right? okay. Alright. Emm. So. Oh. 生于忧患,死于安乐。岂不快哉?当然,嗯,呃,就,这样,那个,哪个,啊,呀,哎呀,哎哟,唉哇,啧,唷,哟,噫!微斯人,吾谁与归?ええと、あの、ま、そう、ええ。äh, hm, so, tja, halt, eigentlich. euh, quoi, bah, ben, tu vois, tu sais, t'sais, eh bien, du coup. genre, comme, style. 응,어,그,음."
             },
         )
-        
+
         self.vad_model = SileroVAD(vad_model_path, device=device)
 
         global dictionary
-        
+
         torch.set_grad_enabled(False)
         self.align_model = LitForcedAlignmentTask.load_from_checkpoint(align_model_path)
         self.grapheme_to_phoneme = DictionaryG2P(dictionary)
@@ -6276,10 +6522,10 @@ class SongEdit:
 
     def process(
         self,
-        input_folder_path="data/input_data/陈鸿宇-火烧云_副歌.flac",
-        dataset_path="data/dataset",
-        align_out_path="data/align",
-        song_and_lyrics_path="data/song_and_lyrics",
+        input_folder_path,
+        dataset_path,
+        align_out_path,
+        song_and_lyrics_path,
         *,
         mode: Literal["force", "match"] = "force",
         out_formats="textgrid,trans",
@@ -6300,35 +6546,35 @@ class SongEdit:
         if not song_and_lyrics_path.exists():
             song_and_lyrics_path.mkdir(parents=True, exist_ok=True)
         else:
-            for i in song_and_lyrics_path.rglob('*'):
-                shutil.rmtree(i,ignore_errors=True)
-            
+            for i in song_and_lyrics_path.rglob("*"):
+                shutil.rmtree(i, ignore_errors=True)
+
         # MFA Align save Path
         align_out_path = Path(align_out_path)
         if not align_out_path.exists():
             align_out_path.mkdir(parents=True, exist_ok=True)
         else:
-            for i in align_out_path.rglob('*'):
-                shutil.rmtree(i,ignore_errors=True)
-        
+            for i in align_out_path.rglob("*"):
+                shutil.rmtree(i, ignore_errors=True)
+
         # Dataset Path
         dataset_path = Path(dataset_path)
         if not dataset_path.exists():
             dataset_path.mkdir(parents=True, exist_ok=True)
         else:
-            for i in dataset_path.rglob('*'):
-                shutil.rmtree(i,ignore_errors=True)
-        
+            for i in dataset_path.rglob("*"):
+                shutil.rmtree(i, ignore_errors=True)
+
         out_formats = [i.strip().lower() for i in out_formats.split(",")]
         align_trainer = pl.Trainer(logger=False)
         self.align_model.set_inference_mode(mode)
         max_retries = 5
         for path in tqdm.tqdm(
             audio_paths, desc="Singing Voice Separation", total=len(audio_paths)
-        ):  
+        ):
             # [BUG]: 去混响存在概率出现问题 `Audio buffer is not finite everywhere`
             attempt = 0
-            
+
             while attempt < max_retries:
                 try:
                     clear_audio, save_path, save_audio_name = singing_voice_separate(
@@ -6345,12 +6591,11 @@ class SongEdit:
                     if attempt == max_retries:
                         raise RuntimeError(f"操作失败，经过 {max_retries} 次尝试") from e
                     print(f"尝试 {attempt} 次，失败 错误: {str(e)}")
-                
+
             clear_audio["waveform"] = clear_audio["waveform"][:, 0]
-            
-            final_audio = { k: v for k, v in clear_audio.items()}
-            # export_to_wav(clear_audio, None, save_path, clear_audio['name'] + f"_save")
-            # breakpoint()
+
+            final_audio = {k: v for k, v in clear_audio.items()}
+
             #############################################
             #    2.1 Coarse VAD & Lyric Recognition     #
             #    2.2 Singing Voice Align                #
@@ -6360,9 +6605,9 @@ class SongEdit:
             speakerdia = speaker_diarization(
                 self.dia_pipeline, clear_audio, self.device
             )
-            
+
             vad_list = self.vad_model.vad(speakerdia, clear_audio)
-            
+
             segment_list = cut_by_speaker_label(vad_list)
             asr_result = asr(self.asr_model, segment_list, clear_audio)
 
@@ -6370,32 +6615,32 @@ class SongEdit:
             sr = clear_audio["sample_rate"]
             temp_audio = clear_audio["waveform"]
             temp_company = clear_audio["company"]
-            
-            offset= {}
-            # # NOTE: 这里是保存拼音和歌词
+
+            offset = {}
             for idx, segment in enumerate(asr_result):
-                # 保存拼音
+
+                # save phoneme
                 with open(
-                    os.path.join(save_path, save_audio_name + f"_{idx}.lab"), "w"
+                    os.path.join(save_path, save_audio_name + f"_{idx}_vocal.lab"), "w"
                 ) as f_ph:
                     f_ph.write(" ".join(segment["phoneme"]))
-                
-                # 保存歌词
+
+                # save word level lyrics
                 with open(
-                    os.path.join(save_path, save_audio_name + f"_{idx}.txt"), "w"
+                    os.path.join(save_path, save_audio_name + f"_{idx}_vocal.txt"), "w"
                 ) as f_word:
                     f_word.write(" ".join(segment["text"]))
-                
+
                 start, end = int(segment["start"] * sr), int(segment["end"] * sr)
                 clear_audio["waveform"] = temp_audio[start:end]
                 clear_audio["company"] = temp_company[start:end]
                 export_to_wav(clear_audio, None, save_path, save_audio_name + f"_{idx}")
                 offset[idx] = {}
-                offset[idx]['start'] = segment["start"]
-                offset[idx]['end'] = segment["end"]
-            
+                offset[idx]["start"] = segment["start"]
+                offset[idx]["end"] = segment["end"]
+
             del clear_audio
-            
+
             # Step 2.2 Singing Voice Align
             self.grapheme_to_phoneme.set_in_format(in_format)
             dataset = self.grapheme_to_phoneme.get_dataset(
@@ -6415,69 +6660,70 @@ class SongEdit:
 
             postprocess(song_and_lyrics_path, align_out_path, dataset_path)
 
-            dataset_save_path = Path(dataset_path) /"wavs"
-            # remove 中间结果
-            
+            dataset_save_path = Path(dataset_path) / "wavs"
+
+            # remove intermediate results
             shutil.rmtree(align_out_path, ignore_errors=True)
             shutil.rmtree(song_and_lyrics_path, ignore_errors=True)
-            
+
             # Combine ds
             prefix, sorted_ds_files = get_sorted_files_with_prefix(dataset_save_path)
             for i in dataset_save_path.glob("*.wav"):
                 os.remove(i)
-            
+
             combined_ds = []
-            
+
             for ds in sorted_ds_files:
-                with open(ds, 'r') as f_ds:
-                    data = json.load(f_ds)[0]                    
+                with open(ds, "r") as f_ds:
+                    data = json.load(f_ds)[0]
                     combined_ds.append(data)
-            
+
             assert len(combined_ds) == len(offset)
             for idx, ds in enumerate(combined_ds):
-                ds["offset"] = offset[idx]['start']
-                ds['offset_end'] = offset[idx]['end']
-            
+                ds["offset"] = offset[idx]["start"]
+                ds["offset_end"] = offset[idx]["end"]
+
             for i in dataset_save_path.glob("*.ds"):
                 os.remove(i)
-            
-            with open(dataset_save_path / f'{prefix}.ds', 'w', encoding='utf-8') as f:
-                json.dump(combined_ds, f, indent=4, ensure_ascii=False) 
-            
+
+            with open(dataset_save_path / f"{prefix}.ds", "w", encoding="utf-8") as f:
+                json.dump(combined_ds, f, indent=4, ensure_ascii=False)
+
             export_to_wav(final_audio, None, dataset_save_path, save_audio_name)
-            
+
 
 class VocalSeparate:
     def __init__(
-        self,
-        separate_model_path: str = "checkpoints/step1/separate_model.pt",
-    ):  
+        self, separate_model_path: str = "checkpoints/step1/separate_model.pt",
+    ):
         if torch.cuda.is_available():
             device_name = "cuda"
         else:
             device_name = "cpu"
         device = torch.device(device_name)
         self.device = device
-        # 模型初始化
-        separate_state_dict = torch.load(separate_model_path,map_location='cpu')
-        self.source_separater = Predictor(separate_state_dict['src_separate'], device=device_name)
-        deecho_ckpt = separate_state_dict['deecho']
-        dereverb_ckpt = separate_state_dict['dereverb']
-        
-        self.echo_seprater = Dereverb(model_name=deecho_ckpt['name'], 
-                                      model_state_dict=deecho_ckpt['state_dict'],
-                                      device=device_name)
-        
-        self.dereverb_model = Dereverb(
-            model_name=dereverb_ckpt['name'], 
-            model_state_dict=dereverb_ckpt['state_dict'], 
-            device=device_name
+
+        separate_state_dict = torch.load(separate_model_path, map_location="cpu")
+        self.source_separater = Predictor(
+            separate_state_dict["src_separate"], device=device_name
         )
-        
+        deecho_ckpt = separate_state_dict["deecho"]
+        dereverb_ckpt = separate_state_dict["dereverb"]
+
+        self.echo_seprater = Dereverb(
+            model_name=deecho_ckpt["name"],
+            model_state_dict=deecho_ckpt["state_dict"],
+            device=device_name,
+        )
+
+        self.dereverb_model = Dereverb(
+            model_name=dereverb_ckpt["name"],
+            model_state_dict=dereverb_ckpt["state_dict"],
+            device=device_name,
+        )
+
     def process(
-        self,
-        input_folder_path="data/input_data/陈鸿宇-火烧云_副歌.flac",
-        out_path="data/dataset",
+        self, input_folder_path, out_path,
     ):
         # Input Folder Path
         input_folder_path = Path(input_folder_path)
@@ -6492,7 +6738,7 @@ class VocalSeparate:
         out_path = Path(out_path)
         if not out_path.exists():
             out_path.mkdir(parents=True, exist_ok=True)
-        
+
         max_retries = 5
         for path in tqdm.tqdm(
             audio_paths, desc="Singing Voice Separation", total=len(audio_paths)
@@ -6514,9 +6760,9 @@ class VocalSeparate:
                     if attempt == max_retries:
                         raise RuntimeError(f"操作失败，经过 {max_retries} 次尝试") from e
                     print(f"尝试 {attempt} 次，失败 错误: {str(e)}")
-                
+
             clear_audio["waveform"] = clear_audio["waveform"][:, 0]
-            export_to_wav(clear_audio, None, save_path, save_audio_name) 
+            export_to_wav(clear_audio, None, save_path, save_audio_name)
 
 
 class SOFA:
@@ -6526,165 +6772,175 @@ class SOFA:
     `mode`=txt 时候自动执行G2P并对齐, =lab时 自动对齐
     
     """
+
     def __init__(self, model_path):
         global dictionary
         torch.set_grad_enabled(False)
         self.align_model = LitForcedAlignmentTask.load_from_checkpoint(model_path)
         self.grapheme_to_phoneme = DictionaryG2P(dictionary)
         self.get_AP = LoudnessSpectralcentroidAPDetector()
-    
-    def process(self,
+
+    def process(
+        self,
         song_and_lyrics_path,
         align_out_path,
         mode: Literal["force", "match"] = "force",
         out_formats="textgrid,trans",
-        in_format:Literal["txt","lab"]="lab",
-        save_confidence=False,):
-        
+        in_format: Literal["txt", "lab"] = "lab",
+        save_confidence=False,
+    ):
+
         song_and_lyrics_path = Path(song_and_lyrics_path)
         out_formats = [i.strip().lower() for i in out_formats.split(",")]
         align_trainer = pl.Trainer(logger=False)
         self.align_model.set_inference_mode(mode)
-        
+
         self.grapheme_to_phoneme.set_in_format(in_format)
-        
+
         dataset = self.grapheme_to_phoneme.get_dataset(
             song_and_lyrics_path.rglob("*.wav")
         )
-        
+
         predictions = align_trainer.predict(
             self.align_model, dataloaders=dataset, return_predictions=True
         )
-        
+
         predictions = self.get_AP.process(predictions)
         predictions, log = post_processing(predictions)
         exporter = Exporter(predictions, log, align_out_path)
         if save_confidence:
             out_formats.append("confidence")
         exporter.export(out_formats)
-        
-    
+
+
 class Proofreading:
     """ 
     1. 首先检查insert
     2. 对修改的文字进行重新对齐并存库
     
     """
+
     def __init__(self, align_model_path):
         self.sofa = SOFA(align_model_path)
-    
+
     def process(self, dataset_path, temp_save_path):
-        """ Check insert data and align all data.
-        [
-            {
-            "offset": 20.993208828522924,
-            "text": "",
-            "word_seq": "",
-            "word2ph": "",
-            "word_dur": "",
-            "ph_seq": "",
-            "ph_dur": "",
-            "ph_num": "",
-            "note_seq": "",
-            "note_dur": "",
-            "note_slur": "",
-            "f0_seq": "",
-            "f0_timestep": "0.011609977324263039",
-            "offset_end": 47.75020882852293
-            },
-            
-            # NOTE: Insert
-            {
-                "offset": float,
-                "offset_end":float,
-                "text": str
-            }
-        ]
-        
-        """
+        """ Check insert data and align all data."""
         global DS_KEYS
         temp_save_path = Path(temp_save_path)
-        temp_save_path.mkdir( parents=True, exist_ok=True)
-        
+        temp_save_path.mkdir(parents=True, exist_ok=True)
+
         dataset_path = Path(dataset_path)
-        dataset_path_files =  list(dataset_path.rglob('*.ds'))
-        
-        for i in tqdm.tqdm(dataset_path_files,total=len(dataset_path_files), desc="Check Files..."):
-            assert Path(str(i).replace("ds", 'wav')).exists()
-        
+        dataset_path_files = list(dataset_path.rglob("*.ds"))
+
+        for i in tqdm.tqdm(
+            dataset_path_files, total=len(dataset_path_files), desc="Check Files..."
+        ):
+            assert Path(str(i).replace("ds", "wav")).exists()
+
         for ds_file in dataset_path_files:
             file_name = ds_file.stem
-            
-            with open(ds_file, 'r') as f_ds:
+
+            with open(ds_file, "r") as f_ds:
                 ds_data = json.load(f_ds)
-                
+
                 audio = standardization(str(ds_file.with_suffix(".wav")))
-                
+
                 offset = {}
-                for ds_idx, ds_dict  in enumerate(ds_data):
+                for ds_idx, ds_dict in enumerate(ds_data):
                     insert_data_keys = ds_dict.keys()
                     offset[ds_idx] = {}
-                    offset[ds_idx]['start'] = ds_dict["offset"]
-                    offset[ds_idx]['end'] = ds_dict["offset_end"]
-                    if len(insert_data_keys)!=len(DS_KEYS):
+                    offset[ds_idx]["start"] = ds_dict["offset"]
+                    offset[ds_idx]["end"] = ds_dict["offset_end"]
+                    if len(insert_data_keys) != len(DS_KEYS):
                         # check insert
-                        assert "offset" in insert_data_keys and "offset_end" in insert_data_keys and "text" in insert_data_keys ,f"""
+                        assert (
+                            "offset" in insert_data_keys
+                            and "offset_end" in insert_data_keys
+                            and "text" in insert_data_keys
+                        ), f"""
                         Please check your new data dict keys, keys should be consist of `offset`, `offset_end` and `text`.
                         """
-                        start = int(ds_dict['offset'] * audio['sample_rate'])
-                        end = int(ds_dict['offset_end'] * audio['sample_rate'])
-                        sf.write(temp_save_path/ f"{file_name}_{ds_idx}.wav", audio['waveform'][start: end], audio['sample_rate'])
-                        
-                        clear_text, clear_phoneme = chinese_to_ipa(ds_dict['text'])
+                        start = int(ds_dict["offset"] * audio["sample_rate"])
+                        end = int(ds_dict["offset_end"] * audio["sample_rate"])
+                        sf.write(
+                            temp_save_path / f"{file_name}_{ds_idx}.wav",
+                            audio["waveform"][start:end],
+                            audio["sample_rate"],
+                        )
+
+                        clear_text, clear_phoneme = chinese_to_ipa(ds_dict["text"])
 
                     else:
-                        # check modified 
-                        start = int(ds_dict['offset'] * audio['sample_rate'])
-                        end = int(ds_dict['offset_end'] * audio['sample_rate'])
-                        sf.write(temp_save_path/ f"{file_name}_{ds_idx}.wav", audio['waveform'][start: end], audio['sample_rate'])
-                        words = ds_dict['text'].split()
-                        filtered_words = [word for word in words if word not in ["SP", "AP"]]
-                        clear_text, clear_phoneme = chinese_to_ipa(" ".join(filtered_words))
+                        # check modified
+                        start = int(ds_dict["offset"] * audio["sample_rate"])
+                        end = int(ds_dict["offset_end"] * audio["sample_rate"])
+                        sf.write(
+                            temp_save_path / f"{file_name}_{ds_idx}.wav",
+                            audio["waveform"][start:end],
+                            audio["sample_rate"],
+                        )
+                        words = ds_dict["text"].split()
+                        filtered_words = [
+                            word for word in words if word not in ["SP", "AP"]
+                        ]
+                        clear_text, clear_phoneme = chinese_to_ipa(
+                            " ".join(filtered_words)
+                        )
                     clear_text = " ".join(clear_text)
                     clear_phoneme = " ".join(clear_phoneme)
-                    with open(temp_save_path/ f"{file_name}_{ds_idx}.lab", 'w') as f_lab:
+                    with open(
+                        temp_save_path / f"{file_name}_{ds_idx}.lab", "w"
+                    ) as f_lab:
                         f_lab.write(clear_phoneme)
-                    with open(temp_save_path/ f"{file_name}_{ds_idx}.txt", 'w') as f_txt:
+                    with open(
+                        temp_save_path / f"{file_name}_{ds_idx}.txt", "w"
+                    ) as f_txt:
                         f_txt.write(clear_text)
-                        
-            self.sofa.process(temp_save_path, temp_save_path/"align")
-            postprocess(temp_save_path, temp_save_path/"align", temp_save_path/"dataset")
+
+            self.sofa.process(temp_save_path, temp_save_path / "align")
+            postprocess(
+                temp_save_path, temp_save_path / "align", temp_save_path / "dataset"
+            )
 
             # TODO read and insert
-            
-            dataset_save_path = temp_save_path /"dataset" /"wavs"
-            
+
+            dataset_save_path = temp_save_path / "dataset" / "wavs"
+
             # Combine ds
-            prefix, sorted_ds_files = get_sorted_files_with_prefix(dataset_save_path,'*.ds')
+            prefix, sorted_ds_files = get_sorted_files_with_prefix(
+                dataset_save_path, "*.ds"
+            )
             for i in dataset_save_path.glob("*.wav"):
                 os.remove(i)
-            
+
             for ds in sorted_ds_files:
-                _idx = int(re.match(r'^.+?_(\d+)+\.ds$', ds).group(1))
-                with open(ds, 'r') as f_ds:
-                    data = json.load(f_ds)[0]     
-                    data['offset'] = offset[_idx]['start']
-                    data['offset_end'] = offset[_idx]['end']     
+                _idx = int(re.match(r"^.+?_(\d+)+\.ds$", ds).group(1))
+                with open(ds, "r") as f_ds:
+                    data = json.load(f_ds)[0]
+                    data["offset"] = offset[_idx]["start"]
+                    data["offset_end"] = offset[_idx]["end"]
                     ds_data[_idx] = data
-            
-            with open(dataset_path / f"{prefix.split('.')[0]}_proofread.ds", 'w', encoding='utf-8') as f:
-                json.dump(ds_data, f, indent=4, ensure_ascii=False) 
+
+            with open(
+                dataset_path / f"{prefix.split('.')[0]}_proofread.ds",
+                "w",
+                encoding="utf-8",
+            ) as f:
+                json.dump(ds_data, f, indent=4, ensure_ascii=False)
         shutil.rmtree(temp_save_path, ignore_errors=True)
-    
+
     # TODO
-    def _combine_ds(self, ds_file, idx_list:list):
+    def _combine_ds(self, ds_file, idx_list: list):
         """
             idx_list: 
         """
         raise NotImplementedError()
 
-__all__=["SongEdit",
-         "VocalSeparate",
-         "SOFA",
-         "Proofreading",
-         "postprocess",]
+
+__all__ = [
+    "SongEdit",
+    "VocalSeparate",
+    "SOFA",
+    "Proofreading",
+    "postprocess",
+]
