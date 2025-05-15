@@ -2,8 +2,8 @@
 # cython: language_level=3
 # Copyright (c) 2025 IACAS. by YangChen
 
-""" 
-Step. 2. 歌声合成
+__doc__=""" 
+Step. 2. Singing Voice Synthesis
 """
 
 import math
@@ -1000,6 +1000,7 @@ def init_weights(m, mean=0.0, std=0.01):
 def dynamic_range_compression_torch(x, C=1, clip_val=1e-5):
     return torch.log(torch.clamp(x, min=clip_val) * C)
 
+
 def spectral_normalize_torch(magnitudes):
     output = dynamic_range_compression_torch(magnitudes)
     return output
@@ -1059,7 +1060,6 @@ def mel_spectrogram(
     spec = spectral_normalize_torch(spec)
 
     return spec
-
 
 
 def recursive_munch(d):
@@ -1297,7 +1297,10 @@ class SConv1d(nn.Module):
 
     @staticmethod
     def pad1d(
-        x: torch.Tensor, paddings: Tuple[int, int], mode: str = "zero", value: float = 0.0
+        x: torch.Tensor,
+        paddings: Tuple[int, int],
+        mode: str = "zero",
+        value: float = 0.0,
     ):
         """Tiny wrapper around F.pad, just to allow for reflect padding on small input.
         If this is the case, we insert extra 0 padding to the right before the reflection happen.
@@ -1316,6 +1319,7 @@ class SConv1d(nn.Module):
             return padded[..., :end]
         else:
             return F.pad(x, paddings, mode, value)
+
 
 class WN(torch.nn.Module):
     def __init__(
@@ -5169,7 +5173,6 @@ class ResidualBlock(nn.Module):
         return (x + residual) / math.sqrt(2.0), skip
 
 
-
 #################################################
 #                   DDPM                        #
 #################################################
@@ -6609,7 +6612,7 @@ class ReplaceLyrics:
                     raw_text.append(_word)
                     g2p_text.append(_pinyins)
         return raw_text, g2p_text
-    
+
     def chinese_to_ipa(self, text):
         """Convert Chinese text to IPA phoneme representation through pinyin."""
         text = self._number_to_chinese(text)  # Convert numbers first
@@ -6674,13 +6677,13 @@ class SingingVoiceSynthesis:
 
         self.device = device
         self.fp16 = fp16
-        
+
         # Load DiffSinger
         if v1_model_path is not None:
             self.diffsinger = DiffSingerAcousticInfer(
                 DIFFSINGER_CONFIG, v1_model_path, device
             )
-        
+
         # Load Seed-VC
         if v2_model_path is not None:
             model_v2_ckpt = torch.load(v2_model_path, map_location="cpu")
@@ -6775,7 +6778,9 @@ class SingingVoiceSynthesis:
         S_ori = S_ori[:, : waves_16k.size(-1) // 320 + 1]
         return S_ori
 
-    def _ds_forward(self, ds_file, out_path, key: int = 0, save_audio: bool = True):
+    def _ds_forward(
+        self, ds_file, out_path, key: Optional[int] = None, save_audio: bool = True
+    ):
         with open(ds_file, "r", encoding="utf-8") as f:
             params = json.load(f)
 
@@ -6786,10 +6791,20 @@ class SingingVoiceSynthesis:
             print("The input file is empty.")
             exit()
 
+        if key is None:
+            _f0_seq = []
+            for i in params:
+                _f0_seq.extend(list(map(float, i["f0_seq"].strip().split(" "))))
+            min_f0 = np.median(_f0_seq)
+            key = int((230.0 - min_f0) / min_f0 * 10)
+
         params = trans_key(params, key)
 
-        return self.diffsinger.run_inference(
-            params, out_dir=out_path, save_audio=save_audio
+        return (
+            self.diffsinger.run_inference(
+                params, out_dir=out_path, save_audio=save_audio
+            ),
+            key,
         )
 
     def _sv_forward(
@@ -6797,11 +6812,11 @@ class SingingVoiceSynthesis:
         ds_out,
         ref_wav_path,
         out_path,
-        diffusion_steps: int = 25,
-        length_adjust: float = 1.0,
-        cfg_rate: float = 0.7,
-        auto_adjust_f0: bool = False,
-        pitch_shift: int = 0,
+        diffusion_steps: Optional[int] = 25,
+        length_adjust: Optional[float] = 1.0,
+        cfg_rate: Optional[float] = 0.7,
+        auto_adjust_f0: Optional[bool] = None,
+        pitch_shift: Optional[int] = None,
     ):
         ref_audio = librosa.load(ref_wav_path, sr=SAMPLERATE)[0]
         ref_audio = (
@@ -6869,6 +6884,8 @@ class SingingVoiceSynthesis:
         F0_ori = self.f0_fn(ori_waves_16k[0], thred=0.03)
         F0_alt = self.f0_fn(converted_waves_16k[0], thred=0.03)
 
+        min_f0_ori = np.median(F0_ori[F0_ori > 1])
+        min_f0_alt = np.median(F0_alt[F0_alt > 1])
         F0_ori = torch.from_numpy(F0_ori).to(self.device)[None]
         F0_alt = torch.from_numpy(F0_alt).to(self.device)[None]
 
@@ -6887,11 +6904,23 @@ class SingingVoiceSynthesis:
             shifted_log_f0_alt[F0_alt > 1] = (
                 log_f0_alt[F0_alt > 1] - median_log_f0_alt + median_log_f0_ori
             )
+
         shifted_f0_alt = torch.exp(shifted_log_f0_alt)
-        if pitch_shift != 0:
-            shifted_f0_alt[F0_alt > 1] = adjust_f0_semitones(
-                shifted_f0_alt[F0_alt > 1], pitch_shift
-            )
+
+        if pitch_shift is not None:
+            if auto_adjust_f0 is not None:
+                shifted_f0_alt[F0_alt > 1] = adjust_f0_semitones(
+                    shifted_f0_alt[F0_alt > 1], pitch_shift
+                )
+            else:
+                if abs(min_f0_ori - min_f0_alt) < 50:
+                    shifted_f0_alt[F0_alt > 1] = adjust_f0_semitones(
+                        shifted_f0_alt[F0_alt > 1], -pitch_shift % 12
+                    )
+                else:
+                    shifted_f0_alt[F0_alt > 1] = adjust_f0_semitones(
+                        shifted_f0_alt[F0_alt > 1], (12 - pitch_shift) % 12
+                    )
 
         # Length regulation
         cond, _, codes, commitment_loss, codebook_loss = self.seed_vc.length_regulator(
@@ -7016,12 +7045,12 @@ class SingingVoiceSynthesis:
         out_path,
         ref_wav_path: Optional[str] = None,
         *,
-        diffusion_steps: int = 25,
-        length_adjust: float = 1.0,
-        cfg_rate: float = 0.7,
-        auto_adjust_f0: bool = False,
-        pitch_shift_svs: int = 0,
-        pitch_shift_svc: int = 0,
+        diffusion_steps: Optional[int] = 25,
+        length_adjust: Optional[float] = 1.0,
+        cfg_rate: Optional[float] = 0.7,
+        auto_adjust_f0: Optional[bool] = False,
+        pitch_shift_svs: Optional[int] = None,
+        pitch_shift_svc: Optional[int] = None,
         mode: Literal["svs", "svc", "svs_svc"] = "svs_svc",
     ):
         """ 
@@ -7054,18 +7083,18 @@ class SingingVoiceSynthesis:
         ds_file_path,
         out_path,
         ref_wav_path: Optional[str] = None,
-        diffusion_steps: int = 25,
-        length_adjust: float = 1.0,
-        cfg_rate: float = 0.7,
-        auto_adjust_f0: bool = False,
-        pitch_shift_svs: int = 0,
-        pitch_shift_svc: int = 0,
+        diffusion_steps: Optional[int] = 25,
+        length_adjust: Optional[float] = 1.0,
+        cfg_rate: Optional[float] = 0.7,
+        auto_adjust_f0: Optional[bool] = False,
+        pitch_shift_svs: Optional[int] = None,
+        pitch_shift_svc: Optional[int] = None,
         mode: Literal["svs", "svc", "svs_svc"] = "svs_svc",
     ):
         if mode == "svs_svc":
             assert ds_file_path is not None
             assert ref_wav_path is not None
-            ds_wav = self._ds_forward(
+            ds_wav, key = self._ds_forward(
                 ds_file_path, out_path, pitch_shift_svs, save_audio=False
             )
             ds_wav = torch.tensor(ds_wav).unsqueeze(0).float().to(self.device)
@@ -7077,14 +7106,14 @@ class SingingVoiceSynthesis:
                 diffusion_steps,
                 length_adjust,
                 cfg_rate,
-                auto_adjust_f0,
-                pitch_shift_svc,
+                None,
+                pitch_shift_svc if pitch_shift_svc is not None else key,
             )
         elif mode == "svs":
             assert Path(ds_file_path).suffix == ".ds"
             return self._ds_forward(
                 ds_file_path, out_path, pitch_shift_svs, save_audio=True
-            )
+            )[0]
 
         elif mode == "svc":
             assert ref_wav_path is not None
@@ -7105,26 +7134,26 @@ class SingingVoiceSynthesis:
     def combine(
         self,
         gen_vocal,
-        company,
+        accomp,
         out_path,
         ori_vocal: Optional[str] = None,
         *,
-        vocal_company_volume_rate: float = 0.5,
-        time_stamps_list: Optional[list] = None,
+        vocal_volume: float = 0.5,
+        time_stamps: Optional[list] = None,
     ):
         """
         Mix generated vocal with accompaniment, with optional original vocal blending.
         
         Args:
             gen_vocal (np.ndarray/str): Generated vocal audio (array or filepath)
-            company (np.ndarray/str): Accompaniment audio (array or filepath)
+            accomp (np.ndarray/str): Accompaniment audio (array or filepath)
             out_path (str): Output file path
             ori_vocal (str, optional): Original vocal audio path for blending
-            vocal_company_volume_rate (float): Volume balance (0.0-1.0)
+            vocal_volume (float): Volume balance (0.0-1.0)
                                          0.0 = only accompaniment
                                          0.5 = equal balance (default)
                                          1.0 = only vocal
-            time_stamps_list (list): List of (start,end) seconds tuples where
+            time_stamps (list): List of (start,end) seconds tuples where
                                     original vocal should replace generated vocal
         
         Example:
@@ -7139,23 +7168,25 @@ class SingingVoiceSynthesis:
         """
         # Standardize and balance volumes
         gen_vocal = standardization(gen_vocal, SAMPLERATE)
-        gen_vocal['waveform'] = gen_vocal['waveform'] * vocal_company_volume_rate * 2
-        
-        company = standardization(company, SAMPLERATE)
-        company['waveform'] = company['waveform'] * (1 - vocal_company_volume_rate) * 2
+        gen_vocal["waveform"] = gen_vocal["waveform"] * vocal_volume * 2
+
+        accomp = standardization(accomp, SAMPLERATE)
+        accomp["waveform"] = accomp["waveform"] * (1 - vocal_volume) * 2
 
         # Blend with original vocal at specified timestamps
-        if time_stamps_list is not None and ori_vocal is not None:
+        if time_stamps is not None and ori_vocal is not None:
             ori_vocal = standardization(ori_vocal, SAMPLERATE)
-            ori_vocal['waveform'] = company['waveform'] * vocal_company_volume_rate * 2
-            
-            for start, end in time_stamps_list:
+            ori_vocal["waveform"] = accomp["waveform"] * vocal_volume * 2
+
+            for start, end in time_stamps:
                 start_sample = int(start * SAMPLERATE)
                 end_sample = int(end * SAMPLERATE)
-                gen_vocal['waveform'][start_sample:end_sample, ] = ori_vocal['waveform'][start_sample:end_sample, ]
+                gen_vocal["waveform"][start_sample:end_sample,] = ori_vocal["waveform"][
+                    start_sample:end_sample,
+                ]
 
         # Mix and save final output
-        mixed = self.remixer.mix(gen_vocal, company)["waveform"]
+        mixed = self.remixer.mix(gen_vocal, accomp)["waveform"]
         sf.write(out_path, mixed, SAMPLERATE)
 
 
