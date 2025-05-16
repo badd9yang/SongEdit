@@ -1,5 +1,6 @@
 # Copyright (c) 2025 by badd9yang
 
+
 __doc__ = """ 
 Step. 1. Source Separation and DeEcho; return singing voice and MFA and MIDI result.
 """
@@ -79,7 +80,6 @@ from whisperx.asr import FasterWhisperPipeline, WhisperModel, find_numeral_symbo
 from whisperx.audio import N_SAMPLES, SAMPLE_RATE, load_audio, log_mel_spectrogram
 from whisperx.types import SingleSegment, TranscriptionResult
 
-secret_key = "my_custom_secret_key_2023"
 
 VAD_THRESHOLD = 20
 SAMPLING_RATE = 16000
@@ -2316,12 +2316,9 @@ class MaskEstimator(nn.Module):
         dim_hidden = dim * mlp_expansion_factor
 
         for dim_in in dim_inputs:
-            net = []
-
             mlp = nn.Sequential(
                 MLP(dim, dim_in * 2, dim_hidden=dim_hidden, depth=depth), nn.GLU(dim=-1)
             )
-
             self.to_freqs.append(mlp)
 
     def forward(self, x):
@@ -2844,11 +2841,9 @@ class Predictor:
                         )
                         sys.stdout.flush()
 
-                print()
                 estimated_sources = result / counter
                 estimated_sources = estimated_sources.cpu().numpy()
                 np.nan_to_num(estimated_sources, copy=False, nan=0.0)
-
                 if mix.shape[1] > 2 * border and border > 0:
                     estimated_sources = estimated_sources[..., border:-border]
 
@@ -3403,8 +3398,8 @@ class CascadedASPPNet(nn.Module):
         return h
 
 
-class AudioPreprocess:
-    def __init__(self, model_name, model_state_dict, agg, tta=False, device=None):
+class Dereverb:
+    def __init__(self, model_name, model_state_dict, agg=10, tta=False, device=None):
         self.data = {
             # Processing Options
             "postprocess": False,
@@ -3518,24 +3513,27 @@ class AudioPreprocess:
         return np.asfortranarray(spec_c)
 
     def process(
-        self, music_file,
-    ):
+            self, audio,
+        ):
+        """ 
+        audio['waveform]: (samples, 2)
+        """
         x_wave, y_wave, x_spec_s, y_spec_s = {}, {}, {}, {}
         bands_n = len(self.mp.param["band"])
-
+        
         for d in range(bands_n, 0, -1):
             bp = self.mp.param["band"][d]
             if d == bands_n:  # high-end band
                 # librosa loading may be buggy for some audio. ffmpeg will solve this, but it's a pain
-                x_wave[d] = librosa.core.load(
-                    music_file,
-                    sr=bp["sr"],
-                    mono=False,
-                    dtype=np.float32,
+                x_wave[d] = librosa.core.resample(
+                    audio['waveform'].T,
+                    orig_sr=audio['sample_rate'],
+                    target_sr=bp["sr"],
                     res_type=bp["res_type"],
-                )[0]
+                )
                 if x_wave[d].ndim == 1:
                     x_wave[d] = np.asfortranarray([x_wave[d], x_wave[d]])
+                
             else:  # lower bands
                 x_wave[d] = librosa.core.resample(
                     x_wave[d + 1],
@@ -3552,9 +3550,6 @@ class AudioPreprocess:
                 self.mp.param["mid_side_b2"],
                 self.mp.param["reverse"],
             )
-
-            # pdb.set_trace()
-
         input_high_end_h = (
             self.mp.param["band"][1]["n_fft"] // 2
             - self.mp.param["band"][1]["crop_stop"]
@@ -3571,6 +3566,7 @@ class AudioPreprocess:
             "value": aggresive_set,
             "split_bin": self.mp.param["band"][1]["crop_stop"],
         }
+
         with torch.no_grad():
             pred, x_mag, x_phase = self.inference(
                 x_spec_m, self.config.device, self.model, aggressiveness, self.data
@@ -3584,14 +3580,13 @@ class AudioPreprocess:
 
         wav_instrument = self.cmb_spectrogram_to_wave(y_spec_m, self.mp)
         wav_vocals = self.cmb_spectrogram_to_wave(v_spec_m, self.mp)
-
+        
         return (
             np.array(wav_instrument),
             np.array(wav_vocals),
             self.mp.param["sr"],
             self.data["agg"],
         )
-
     @staticmethod
     def spectrogram_to_wave(spec, hop_length, mid_side, mid_side_b2, reverse):
         spec_left = np.asfortranarray(spec[0])
@@ -3849,36 +3844,6 @@ class AudioPreprocess:
         else:
             return pred * coef, X_mag, np.exp(1.0j * X_phase)
 
-
-class Dereverb:
-    def __init__(self, model_name, model_state_dict, device):
-        self.model = AudioPreprocess(
-            model_name, model_state_dict, agg=10, tta=False, device=device
-        )
-
-    def process(self, audio: str = None):
-
-        info = sf.info(audio)
-        tmp_path_root = Path(__file__).parent.parent / "temp"
-        if not tmp_path_root.exists():
-            tmp_path_root.mkdir(parents=True, exist_ok=True)
-        tmp_path = None
-
-        if not (info.channels == 2 and info.samplerate == "44100"):
-            tmp_path = tmp_path_root / os.path.basename(audio)
-            AudioSegment.from_file(audio).export(
-                tmp_path,
-                format="wav",
-                codec="pcm_s16le",
-                bitrate="16k",
-                parameters=["-ar", "44100"],
-            )
-        results = self.model.process(audio if tmp_path is None else tmp_path)
-
-        if tmp_path is not None:
-            os.remove(tmp_path)
-        shutil.rmtree(tmp_path_root, ignore_errors=True)
-        return results
 
 
 #########################################################
@@ -5380,7 +5345,7 @@ def source_separation(predictor, audio):
         mix = librosa.resample(audio["waveform"], orig_sr=rate, target_sr=44100)
     vocals, no_vocals = predictor.predict(mix)
     # convert vocals back to previous sample rate
-    vocals = librosa.resample(vocals.T, orig_sr=44100, target_sr=rate).T
+    # vocals = librosa.resample(vocals.T, orig_sr=44100, target_sr=rate).T
     audio["waveform"] = vocals
     audio["company"] = no_vocals
     return audio
@@ -5432,19 +5397,10 @@ def dereverb(dereverb_model, audio, is_dereverb=False):
     """
     Perform dereverberation on the given audio.
     """
-
-    # save audio to temp file
-    temp_dir = Path(__file__).parent / "temp"
-    if not temp_dir.exists():
-        temp_dir.mkdir(parents=True, exist_ok=True)
-
-    temp_file = temp_dir / f"{audio['name']}.wav"
-    sf.write(temp_file, audio["waveform"], audio["sample_rate"])  # (time, channel)
-    results = dereverb_model.process(str(temp_file))
+    results = dereverb_model.process(audio)
     if is_dereverb:
         audio["waveform"] = np.array(results[0], dtype=np.float32)
     else:
-        # NOTE
         silent_dur0, _ = calculate_silence_duration(results[0], audio["sample_rate"])
         silent_dur1, _ = calculate_silence_duration(results[1], audio["sample_rate"])
 
@@ -5452,11 +5408,8 @@ def dereverb(dereverb_model, audio, is_dereverb=False):
             audio["waveform"] = np.array(results[1], dtype=np.float32)
         else:
             audio["waveform"] = np.array(results[0], dtype=np.float32)
-
     audio["sample_rate"] = results[2]
-
-    os.remove(temp_file)
-    shutil.rmtree(temp_dir, ignore_errors=True)
+    
     return audio
 
 
@@ -5701,7 +5654,6 @@ def singing_voice_separate(
         raise IOError("Can't read audio, have deleted the audio")
 
     audio = source_separation(source_separater, audio)
-
     audio = dereverb(echo_seprater, audio, False)  # False
     audio = dereverb(dereverb_model, audio, True)
     if save:
@@ -5932,8 +5884,6 @@ def add_ph_num(transcription):
 
 
 # TODO: modified to `SOME`, and `RMVPE`
-
-
 def estimate_midi(
     transcriptions, waveforms, pe: str = "parselmouth", rest_uv_ratio: float = 0.85,
 ):
@@ -6811,12 +6761,6 @@ class SOFA:
 
 
 class Proofreading:
-    """ 
-    1. 首先检查insert
-    2. 对修改的文字进行重新对齐并存库
-    
-    """
-
     def __init__(self, align_model_path):
         self.sofa = SOFA(align_model_path)
 
@@ -6899,8 +6843,6 @@ class Proofreading:
                 temp_save_path, temp_save_path / "align", temp_save_path / "dataset"
             )
 
-            # TODO read and insert
-
             dataset_save_path = temp_save_path / "dataset" / "wavs"
 
             # Combine ds
@@ -6925,13 +6867,6 @@ class Proofreading:
             ) as f:
                 json.dump(ds_data, f, indent=4, ensure_ascii=False)
         shutil.rmtree(temp_save_path, ignore_errors=True)
-
-    # TODO
-    def _combine_ds(self, ds_file, idx_list: list):
-        """
-            idx_list: 
-        """
-        raise NotImplementedError()
 
 
 __all__ = [
